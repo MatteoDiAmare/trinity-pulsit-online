@@ -2,17 +2,16 @@
 # touches matching paths. Required-review enforcement (i.e. blocking merge
 # without owner approval) is configured separately in branch protection.
 #
-# Scope: the security-sensitive surfaces flagged in the 2026-05-12 CSO diff
-# scan — workflows that hold secrets (TAILSCALE_AUTH_KEY, DEV_SSH_KEY,
-# GCP_*, PYPI publishing), and the Dependabot config that drives upgrade
-# cadence. Add additional reviewers (handles or @org/team) as needed.
+# Pulsit fork policy:
+# Security-sensitive repository configuration is owned by MatteoDiAmare.
+# Upstream Ability AI maintainers are not responsible for this fork.
 
 # Workflow files run with secrets and can compromise the platform if hijacked
-/.github/workflows/        @AndriiPasternak31
+/.github/workflows/        @MatteoDiAmare
 
 # Dependabot config drives the cadence of dependency upgrades — changing it
 # can silently disable security PRs.
-/.github/dependabot.yml    @AndriiPasternak31
+/.github/dependabot.yml    @MatteoDiAmare
 
 # CODEOWNERS itself — must be reviewed before changing the review policy.
-/.github/CODEOWNERS        @AndriiPasternak31
+/.github/CODEOWNERS        @MatteoDiAmare
