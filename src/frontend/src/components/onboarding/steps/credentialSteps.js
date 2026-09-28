@@ -154,7 +154,7 @@ export const KEY_PROVIDERS = {
     id: 'gemini',
     title: 'Gemini',
     label: 'Gemini API key',
-    placeholder: 'AIza…',
+    placeholder: 'Paste your Gemini API key',
     enables: 'Powers voice conversations with agents and generates agent avatars.',
     skipConsequence:
       'Without it, voice is off and agents get no generated avatars — the starter fleet shows initials instead of pictures.',
@@ -184,13 +184,7 @@ export function keyFormatError(provider, raw) {
   if (provider === 'resend' && !v.startsWith('re_')) {
     return "That doesn't look like a Resend API key. Resend keys start with re_ — create one at resend.com/api-keys."
   }
-  if (provider === 'gemini' && !v.startsWith('AIza')) {
-    return (
-      "That doesn't look like a Gemini API key. Keys from Google AI Studio start with AIza — " +
-      'create one at aistudio.google.com/apikey.'
-    )
-  }
-  return ''
+    return ''
 }
 
 // `Name <addr@domain>` or a bare address — the backend's `from_address_domain`.
