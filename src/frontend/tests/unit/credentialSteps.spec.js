@@ -129,7 +129,8 @@ describe('optional keys', () => {
     ['resend', 're_abc', ''],
     ['resend', 'sk-abc', /start with re_/],
     ['gemini', 'AIzaAbc', ''],
-    ['gemini', 'sk-abc', /start with AIza/],
+    ['gemini', 'AQ.example', ''],
+    ['gemini', 'any-nonempty-key', ''],
     ['gemini', '', ''],
   ])('%s %s', (provider, value, expected) => {
     const err = keyFormatError(provider, value)
