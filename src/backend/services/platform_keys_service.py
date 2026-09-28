@@ -168,10 +168,9 @@ async def check_resend_key(key: str, from_address: str) -> dict:
 # =============================================================================
 
 def gemini_key_error(key: str) -> Optional[str]:
-    if not key.startswith("AIza"):
+    if not key.strip():
         return (
-            "That doesn't look like a Gemini API key. Keys from Google AI Studio "
-            "start with AIza — create one at aistudio.google.com/apikey."
+            "Enter a Gemini API key from aistudio.google.com/apikey."
         )
     return None
 
@@ -206,6 +205,6 @@ async def check_gemini_key(key: str) -> dict:
         "valid": False,
         "error": (
             f"Google rejected this key (HTTP {resp.status_code}). Copy it again "
-            "from aistudio.google.com/apikey — keys start with AIza."
+            "from aistudio.google.com/apikey."
         ),
     }
