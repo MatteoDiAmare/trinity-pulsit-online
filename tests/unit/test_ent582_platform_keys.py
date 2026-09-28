@@ -169,7 +169,7 @@ def test_oat_token_in_the_api_key_tab_gets_the_spec_copy():
     ("/api/settings/api-keys/resend", {"api_key": "sk-nope"}, "start with re_"),
     ("/api/settings/api-keys/resend", {"api_key": "re_ok", "from_address": "not an address"},
      "noreply@your-domain.com"),
-    ("/api/settings/api-keys/gemini", {"api_key": "sk-nope"}, "start with AIza"),
+    ("/api/settings/api-keys/gemini", {"api_key": "   "}, "Enter a Gemini API key"),
 ])
 def test_bad_input_is_a_named_400_and_stores_nothing(path, body, needle):
     r = _client().put(path, json=body)
@@ -380,6 +380,20 @@ def test_gemini_check_maps_provider_answers(monkeypatch, status, valid, needle):
     # The key rides a header, never the query string (access logs).
     assert calls[0][1]["headers"] == {"x-goog-api-key": "AIza-k"}
     assert "key" not in calls[0][1].get("params", {})
+
+
+def test_new_gemini_key_format_is_accepted_for_provider_check(monkeypatch):
+    calls = []
+    _fake_httpx(monkeypatch, _Resp(200, {}), calls)
+    result = _client().post("/api/settings/api-keys/gemini/test", json={"api_key": "AQ.example"})
+    assert result.json() == {"valid": True}
+    assert calls[0][1]["headers"] == {"x-goog-api-key": "AQ.example"}
+
+
+def test_new_gemini_key_format_can_be_saved():
+    result = _client().put("/api/settings/api-keys/gemini", json={"api_key": "AQ.example"})
+    assert result.status_code == 200
+    assert settings_service.get_gemini_api_key() == "AQ.example"
 
 
 # ---------------------------------------------------------------------------
