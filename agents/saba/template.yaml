@@ -1,0 +1,6 @@
+name: saba
+display_name: "Saba"
+description: "Autonomous economic research and experimentation agent"
+resources:
+  cpu: "2"
+  memory: "4g"
