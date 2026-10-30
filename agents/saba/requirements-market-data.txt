@@ -1,0 +1,5 @@
+# Optional research dependencies; install inside the runtime executing Saba's CLI.
+yfinance>=0.2.65,<2
+pandas>=2.2,<4
+pyarrow>=17,<27
+duckdb>=1.2,<3
