@@ -73,7 +73,7 @@ def moving_average_signal(prices: pd.DataFrame, short: int = 10, long: int = 30)
     if short < 2 or long <= short:
         raise ValueError("require 2 <= short < long")
     close = prices["Close"].astype(float)
-    fast = close.rolling(short, min_periods=long).mean()
+    fast = close.rolling(short, min_periods=short).mean()
     slow = close.rolling(long, min_periods=long).mean()
     signal = pd.Series(np.where(fast > slow, 1, np.where(fast < slow, -1, 0)), index=prices.index)
     return pd.DataFrame({"signal": signal.astype(int)}, index=prices.index)
