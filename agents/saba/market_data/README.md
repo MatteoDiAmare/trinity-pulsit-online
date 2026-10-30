@@ -24,13 +24,7 @@ python -m market_data.cli fetch 'GC=F' --interval 1m --period 7d
 
 Data lives under `~/.local/share/saba/market_data` unless `SABA_MARKET_DATA_DIR` or `--root` overrides it. **Mount this directory as a persistent volume for a Docker-hosted agent.** Data is not committed to Git.
 
-For regularly collecting intraday snapshots on a machine already running the Saba venv, schedule the CLI externally, e.g. cron every 15 minutes during active collection:
-
-```cron
-*/15 * * * * /home/matteo/saba-venv/bin/python /mnt/c/Users/Matteo/saba-test/agents/saba/market_data/../-invalid-  # DO NOT USE
-```
-
-Prefer this working form instead, replacing the directory if your checkout differs:
+To collect intraday snapshots periodically, use cron on the WSL host (ensure cron is running and adjust the checkout path if needed):
 
 ```cron
 */15 * * * * cd /mnt/c/Users/Matteo/saba-test/agents/saba && /home/matteo/saba-venv/bin/python -m market_data.cli fetch 'GC=F' --interval 1m --period 7d >> /tmp/saba-market-fetch.log 2>&1
