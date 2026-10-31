@@ -59,7 +59,8 @@ def result_payload(result, metrics: dict) -> dict:
             "max_drawdown_pct": metrics["max_drawdown_pct"],
             "drawdown_trough_timestamp": eq.index[trough] if len(dd) else None,
             "worst_trade_net_pnl": min((t["net_pnl"] for t in result.trades), default=None),
-            "best_trade_net_pnl": max((t["net_pnl"] for t in result.trades), default=None)}
+            "best_trade_net_pnl": max((t["net_pnl"] for t in result.trades), default=None),
+            "risk_events": result.risk_events, "shortfall": result.shortfall}
     return jsonable({"decisions": result.decisions, "orders": result.orders, "trades": result.trades,
                      "positions": positions, "equity": equity_rows, "risk": risk, "halted": result.halted})
 

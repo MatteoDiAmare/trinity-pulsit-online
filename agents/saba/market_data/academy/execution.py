@@ -30,6 +30,9 @@ class CostModel:
         adverse_bps = self.spread_bps / 2 + (self.slippage_bps if slippage else 0.0)
         return reference * (1 + trade_sign * adverse_bps / 10_000)
 
+    def scaled(self, spread_multiplier: float = 1.0, slippage_multiplier: float = 1.0) -> "CostModel":
+        return CostModel(self.fee_bps, self.spread_bps * spread_multiplier, self.slippage_bps * slippage_multiplier)
+
     def fee(self, notional: float) -> float:
         return abs(notional) * self.fee_bps / 10_000
 
@@ -38,29 +41,43 @@ class CostModel:
 
 
 def resolve_bar_exit(side: int, stop: float | None, take_profit: float | None,
-                     o: float, h: float, l: float):
+                     o: float, h: float, l: float, liquidation: float | None = None):
     """Decide whether a protective exit triggers inside one bar.
 
-    side: +1 long, -1 short. Returns None or (reason, reference_price, ambiguous).
+    side: +1 long, -1 short. `liquidation` is the broker stop-out level (margin call); the adverse
+    level that price reaches FIRST (the nearer one) wins, the stop-loss on ties.
+    Returns None or (reason, reference_price, ambiguous).
     """
+    levels = []
+    if stop is not None:
+        levels.append(("stop", stop))
+    if liquidation is not None:
+        levels.append(("liquidation", liquidation))
+    # nearest adverse level is hit first: highest for longs, lowest for shorts
+    adverse = None
+    if levels:
+        adverse = (max if side == 1 else min)(levels, key=lambda x: (x[1] * side, x[0] == "stop"))
+    kind, level = adverse if adverse else (None, None)
+    loss_reason = "stop_loss" if kind == "stop" else "liquidation"
+    gap_reason = "stop_gap" if kind == "stop" else "liquidation_gap"
     if side == 1:
-        if stop is not None and o <= stop:
-            return "stop_gap", o, False
+        if level is not None and o <= level:
+            return gap_reason, o, False
         if take_profit is not None and o >= take_profit:
             return "take_profit_gap", o, False
-        stop_hit = stop is not None and l <= stop
+        loss_hit = level is not None and l <= level
         tp_hit = take_profit is not None and h >= take_profit
     else:
-        if stop is not None and o >= stop:
-            return "stop_gap", o, False
+        if level is not None and o >= level:
+            return gap_reason, o, False
         if take_profit is not None and o <= take_profit:
             return "take_profit_gap", o, False
-        stop_hit = stop is not None and h >= stop
+        loss_hit = level is not None and h >= level
         tp_hit = take_profit is not None and l <= take_profit
-    if stop_hit and tp_hit:
-        return "stop_loss", stop, True  # conservative: adverse level first
-    if stop_hit:
-        return "stop_loss", stop, False
+    if loss_hit and tp_hit:
+        return loss_reason, level, True  # conservative: adverse level first
+    if loss_hit:
+        return loss_reason, level, False
     if tp_hit:
         return "take_profit", take_profit, False
     return None

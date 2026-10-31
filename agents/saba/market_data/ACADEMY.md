@@ -33,6 +33,41 @@ random-control runs. `final-test` runs one chosen experiment on the untouched te
 `train`/`final-test` also persist full run logs; `export` writes versioned private-by-design JSON for a Supabase-Auth-protected
 bucket: see [ACADEMY_EXPORT.md](ACADEMY_EXPORT.md).
 
+## Instruments, mandatory stop-loss and risk (v0.2)
+
+Academy is instrument-independent: a market is an `InstrumentSpec` (JSON in `academy/instruments/`, versioned in git;
+`GOLD`=GC=F, `EURUSD`=EURUSD=X, `SP500`=ES=F). It carries costs, tick/lot size, leverage cap, maintenance margin,
+worst plausible gap, minimum stop distance and trading hours. The full spec is copied into every experiment's
+configuration (with its sha256), so old results stay reproducible. **All numbers are conservative research assumptions,
+not verified broker terms** - leverage, margin, spread and the broker's negative-balance protection must be verified against
+the real contract before real trading is ever enabled. There is no broker connection and no live trading.
+
+```bash
+python -m market_data.academy_cli train --instrument SP500 --interval 1d --experiments 20 --stop-failure-prob 0.2 --spread-mult 2
+```
+
+* **Stop-loss is mandatory.** Strategies refuse construction without `stop_loss_pct`; the search never samples without one; and the
+  execution layer rejects any entry without a stop (`stop_loss_required`) - there is no switch to disable it. Stops tighter than the
+  instrument's `min_stop_pct` are rejected (`stop_too_tight`).
+* **Sizing = the smallest of three limits** (`risk.py`): *risk* (loss if the stop fills at its level <= `risk_per_trade_pct`, default 1 %),
+  *leverage* (notional <= equity x cap; cap = min of `max_exposure`, profile and instrument) and *gap_stress* (loss if price gaps past the
+  stop by the instrument's worst plausible gap <= `max_worst_case_loss_pct`, default 5 %). Quantities round down to the instrument's step;
+  below the minimum quantity the order is rejected.
+* **Margin:** a stop-out (liquidation) level is derived from the instrument's maintenance margin; whichever adverse level price reaches
+  first (stop or liquidation) fills. An order that would start below maintenance margin is rejected (`insufficient_margin`).
+* **Risk governor** (inside the simulator): daily loss limit (halts entries for the UTC day), max-drawdown halt (permanent for the run,
+  flattens at the next open; result `halted = max_drawdown_halt`), consecutive-loss limit per day. Events are logged in `risk_events`.
+* **Stress** (`StressModel`, CLI flags, `stress.inject_gaps`): spread/slippage multipliers, extra slippage on stop fills, probability that a
+  stop is not honoured (fills at the bar's worst price plus extra slippage), and synthetic level-shift gaps in the data.
+* **Debt accounting:** any loss beyond the balance is recorded as `shortfall` (and a `negative_balance` event) instead of being hidden;
+  `tests/test_academy_risk.py::NeverIndebtTests` asserts it stays zero under combined stress on all three instruments, and a negative test
+  proves the detector fires when the governor is deliberately loosened.
+* New metrics: `shortfall`, `risk_events`, `avg_r_multiple`, `stop_failures`, `liquidations`, `gap_stops`.
+
+Limits of this protection: it is a simulation. It cannot prove that a real broker will fill stops, honour margin rules or protect against
+negative balances; exchange price limits or halts can stop trading altogether; financing/swap, FX conversion of the account currency and
+contract-roll adjustment are not modelled.
+
 ## Protocol
 
 * Chronological split 60 % train / 20 % validation / 20 % final test (by bar count).
@@ -51,7 +86,7 @@ bucket: see [ACADEMY_EXPORT.md](ACADEMY_EXPORT.md).
 | Spread | `spread_bps` full spread: buys pay mid+½, sells receive mid−½. Default 3 bps. |
 | Slippage | `slippage_bps` extra adverse move on market orders and stop exits; none on take-profit limits. Default 2 bps. |
 | Fee | `fee_bps` of notional on every fill. Default 2 bps. (Defaults match `laboratory.py`.) |
-| Positions | One position at a time, long or short, fractional quantity. Opposite signal = close + open at the same open. Same-side signal is rejected (`already_positioned`). |
+| Positions | One position at a time, long or short, fractional quantity (instrument step/min). Opposite signal = close + open at the same open. Same-side signal is rejected (`already_positioned`). |
 | Sizing | Notional + entry fee ≤ equity × `max_exposure` × `size` (default 1.0×, i.e. no leverage). |
 | Insufficient capital | Orders below `min_notional` or with equity ≤ 0 are rejected and logged (`insufficient_capital`). |
 | Stop / take-profit | Percent from the actual **fill** price, checked from the entry bar onwards. |

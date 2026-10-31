@@ -14,6 +14,8 @@ from .laboratory import ExperimentRegistry
 from .academy.execution import CostModel
 from .academy.experiments import run_final_test, run_training
 from .academy.simulator import SimConfig
+from .academy.instruments import available_instruments, load_instrument
+from .academy.risk import RiskProfile, StressModel
 from .academy.ledger import LedgerStore
 from .academy.export import export_all
 
@@ -40,7 +42,14 @@ def main(argv=None):
     t.add_argument("--fee-bps", type=float, default=2.0)
     t.add_argument("--spread-bps", type=float, default=3.0)
     t.add_argument("--slippage-bps", type=float, default=2.0)
-    t.add_argument("--max-exposure", type=float, default=1.0)
+    t.add_argument("--instrument", help="Instrument id (%s); sets symbol, costs, leverage cap, margin" % ", ".join(sorted(available_instruments())))
+    t.add_argument("--max-exposure", type=float, default=None, help="Notional/equity cap (default 1.0 without --instrument, instrument cap with it)")
+    t.add_argument("--risk-per-trade-pct", type=float, default=1.0)
+    t.add_argument("--daily-loss-limit-pct", type=float, default=3.0)
+    t.add_argument("--max-drawdown-halt-pct", type=float, default=20.0)
+    t.add_argument("--spread-mult", type=float, default=1.0, help="Stress: spread multiplier")
+    t.add_argument("--slippage-mult", type=float, default=1.0, help="Stress: slippage multiplier")
+    t.add_argument("--stop-failure-prob", type=float, default=0.0, help="Stress: probability a stop is not honoured")
     t.add_argument("--control-runs", type=int, default=30)
     f = sub.choices["final-test"]
     f.add_argument("--experiment-id", type=int, required=True)
@@ -58,9 +67,17 @@ def main(argv=None):
                              include_abstentions=args.include_abstentions, allow_in_repo=args.allow_in_repo)
             print(json.dumps(out, indent=2))
             return 0
+        spec = load_instrument(args.instrument) if args.command == "train" and args.instrument else None
+        if spec is not None:
+            args.symbol = spec.symbol
         bars = archive.read(args.symbol, args.interval)
         if args.command == "train":
-            cfg = SimConfig(args.capital, CostModel(args.fee_bps, args.spread_bps, args.slippage_bps), args.max_exposure)
+            explicit_costs = any(a.startswith(("--fee-bps", "--spread-bps", "--slippage-bps")) for a in (argv or []))
+            costs = CostModel(args.fee_bps, args.spread_bps, args.slippage_bps) if (spec is None or explicit_costs) else None
+            cfg = SimConfig(args.capital, costs, args.max_exposure if args.max_exposure is not None else (None if spec else 1.0),
+                            instrument=spec,
+                            risk=RiskProfile(args.risk_per_trade_pct, None, 5.0, args.daily_loss_limit_pct, args.max_drawdown_halt_pct),
+                            stress=StressModel(args.spread_mult, args.slippage_mult, 0.0, args.stop_failure_prob))
             out = run_training(bars, registry, symbol=args.symbol, interval=args.interval,
                                experiments=args.experiments, seed=args.seed, sim_config=cfg,
                                control_runs=args.control_runs, ledger=ledger)

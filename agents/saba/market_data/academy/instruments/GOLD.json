@@ -1,0 +1,12 @@
+{
+  "id": "GOLD", "symbol": "GC=F", "name": "Gold (COMEX continuous futures proxy)",
+  "asset_class": "commodity_future", "quote_currency": "USD",
+  "tick_size": 0.1, "min_quantity": 0.01, "quantity_step": 0.01,
+  "costs": {"fee_bps": 2.0, "spread_bps": 3.0, "slippage_bps": 2.0},
+  "max_leverage": 5.0, "broker_max_leverage_assumed": 20.0,
+  "maintenance_margin_fraction": 0.025, "gap_stress_pct": 3.0, "min_stop_pct": 0.15,
+  "trading_hours_per_day": 23.0, "trading_days_per_year": 252,
+  "timezone": "America/New_York",
+  "sessions": "Sun 18:00 - Fri 17:00 ET with a daily 1h break",
+  "notes": "Continuous futures series: contract-roll gaps are not adjusted. Broker terms unverified."
+}

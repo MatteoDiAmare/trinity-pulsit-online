@@ -27,7 +27,8 @@ def compute_metrics(result, interval: str = "1d") -> dict:
     prev = curve[:-1]
     rets = np.where(prev > 0, curve[1:] / np.where(prev > 0, prev, 1) - 1, 0.0)
     sd = rets.std(ddof=1) if len(rets) > 1 else 0.0
-    ann = math.sqrt(BARS_PER_YEAR.get(interval, 252))
+    spec = result.config.instrument
+    ann = math.sqrt(spec.bars_per_year(interval) if spec else BARS_PER_YEAR.get(interval, 252))
     sharpe = rets.mean() / sd * ann if sd > 0 else 0.0
     trades = result.trades
     n = len(trades)
@@ -50,4 +51,10 @@ def compute_metrics(result, interval: str = "1d") -> dict:
         "rejected_orders": int(sum(1 for o in result.orders if o["kind"] == "rejected")),
         "exposure_fraction": _f((result.equity["position_side"] != 0).mean()),
         "halted": result.halted,
+        "shortfall": _f(result.shortfall),
+        "risk_events": len(result.risk_events),
+        "avg_r_multiple": _f(np.mean([t["r_multiple"] for t in trades if t["r_multiple"] is not None])) if n else None,
+        "stop_failures": int(sum(t["exit_reason"] == "stop_failed" for t in trades)),
+        "liquidations": int(sum(t["exit_reason"].startswith("liquidation") for t in trades)),
+        "gap_stops": int(sum(t["exit_reason"] == "stop_gap" for t in trades)),
     }

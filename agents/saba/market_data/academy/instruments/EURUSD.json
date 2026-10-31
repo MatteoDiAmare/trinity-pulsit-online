@@ -1,0 +1,12 @@
+{
+  "id": "EURUSD", "symbol": "EURUSD=X", "name": "EUR/USD spot FX",
+  "asset_class": "fx", "quote_currency": "USD",
+  "tick_size": 0.00001, "min_quantity": 1.0, "quantity_step": 1.0,
+  "costs": {"fee_bps": 0.0, "spread_bps": 0.8, "slippage_bps": 0.5},
+  "max_leverage": 10.0, "broker_max_leverage_assumed": 30.0,
+  "maintenance_margin_fraction": 0.02, "gap_stress_pct": 2.0, "min_stop_pct": 0.05,
+  "trading_hours_per_day": 24.0, "trading_days_per_year": 260,
+  "timezone": "UTC",
+  "sessions": "Sun ~22:00 UTC - Fri ~22:00 UTC, continuous",
+  "notes": "Spot FX from Yahoo has no real volume. Swap/financing not modelled. Capital assumed in quote currency. Broker terms unverified."
+}

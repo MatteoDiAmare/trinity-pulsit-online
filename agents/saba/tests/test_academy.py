@@ -6,7 +6,7 @@ try:
     import numpy as np
     import pandas as pd
     from market_data.laboratory import ExperimentRegistry
-    from market_data.academy import CostModel, SimConfig, Simulator, Decision, build_strategy
+    from market_data.academy import CostModel, SimConfig, Simulator, Decision, build_strategy, RiskProfile
     from market_data.academy.strategies import Strategy
     from market_data.academy.execution import resolve_bar_exit
     from market_data.academy.evaluation import compute_metrics
@@ -46,13 +46,25 @@ class Scripted(Strategy):
 
 
 FREE = CostModel(0, 0, 0)
+# Mandatory stop-loss stays in force; only the sizing/halt LIMITS are opened so that fixed-price
+# fixtures can assert exact fills. Risk behaviour itself is tested in test_academy_risk.py.
+LOOSE = RiskProfile(risk_per_trade_pct=100, max_worst_case_loss_pct=100, daily_loss_limit_pct=100,
+                    max_drawdown_halt_pct=100, max_consecutive_losses=10**6)
+
+
+def BUY(**kw):
+    return Decision("BUY", **{"stop_loss_pct": 50.0, **kw})
+
+
+def SELL(**kw):
+    return Decision("SELL", **{"stop_loss_pct": 50.0, **kw})
 
 
 @unittest.skipIf(pd is None, "optional market-data dependencies not installed")
 class SimulatorTests(unittest.TestCase):
     def run_sim(self, bars, script, costs=FREE, capital=1000.0, **kw):
         strat = Scripted(script)
-        res = Simulator(SimConfig(capital, costs, **kw)).run(bars, strat)
+        res = Simulator(SimConfig(capital, costs, risk=LOOSE, **kw)).run(bars, strat)
         return res, strat
 
     # ---- look-ahead ----
@@ -91,7 +103,7 @@ class SimulatorTests(unittest.TestCase):
 
     def test_fill_happens_at_next_open_not_signal_close(self):
         bars = make_bars([(100, 101, 99, 100), (110, 111, 109, 110), (110, 111, 109, 110)])
-        res, _ = self.run_sim(bars, {0: Decision("BUY")})
+        res, _ = self.run_sim(bars, {0: BUY()})
         entry = [o for o in res.orders if o["kind"] == "entry"][0]
         self.assertEqual(entry["fill_price"], 110)
         self.assertEqual(entry["timestamp"], bars.index[1])
@@ -107,7 +119,7 @@ class SimulatorTests(unittest.TestCase):
     def test_costs_applied_to_both_fills(self):
         bars = make_bars([(100, 100, 100, 100)] * 4)
         costs = CostModel(fee_bps=10, spread_bps=20, slippage_bps=10)
-        res, _ = self.run_sim(bars, {0: Decision("BUY"), 1: Decision("CLOSE")}, costs)
+        res, _ = self.run_sim(bars, {0: BUY(), 1: Decision("CLOSE")}, costs)
         t = res.trades[0]
         self.assertAlmostEqual(t["entry_price"], 100 * (1 + 0.0020), places=9)   # half spread 10bps + slip 10bps
         self.assertAlmostEqual(t["exit_price"], 100 * (1 - 0.0020), places=9)
@@ -119,8 +131,8 @@ class SimulatorTests(unittest.TestCase):
     def test_more_costs_never_help(self):
         bars = random_walk(300)
         s = lambda: build_strategy("sma_cross", {"short": 5, "long": 20})
-        free = Simulator(SimConfig(costs=FREE)).run(bars, s())
-        costly = Simulator(SimConfig(costs=CostModel(10, 10, 10))).run(bars, s())
+        free = Simulator(SimConfig(costs=FREE, risk=LOOSE)).run(bars, s())
+        costly = Simulator(SimConfig(costs=CostModel(10, 10, 10), risk=LOOSE)).run(bars, s())
         self.assertGreater(free.equity.equity.iloc[-1], costly.equity.equity.iloc[-1])
 
     def test_negative_costs_rejected(self):
@@ -130,7 +142,7 @@ class SimulatorTests(unittest.TestCase):
     # ---- stops ----
     def test_stop_loss_long(self):
         bars = make_bars([(100, 100, 100, 100), (100, 101, 100, 100), (100, 100, 97, 98), (98, 98, 98, 98)])
-        res, _ = self.run_sim(bars, {0: Decision("BUY", stop_loss_pct=2)})
+        res, _ = self.run_sim(bars, {0: BUY(stop_loss_pct=2)})
         t = res.trades[0]
         self.assertEqual(t["exit_reason"], "stop_loss")
         self.assertAlmostEqual(t["exit_price"], 98.0)
@@ -138,25 +150,25 @@ class SimulatorTests(unittest.TestCase):
 
     def test_stop_loss_short(self):
         bars = make_bars([(100, 100, 100, 100), (100, 100, 100, 100), (100, 103, 100, 102), (102, 102, 102, 102)])
-        res, _ = self.run_sim(bars, {0: Decision("SELL", stop_loss_pct=2)})
+        res, _ = self.run_sim(bars, {0: SELL(stop_loss_pct=2)})
         self.assertEqual(res.trades[0]["exit_reason"], "stop_loss")
         self.assertAlmostEqual(res.trades[0]["exit_price"], 102.0)
         self.assertLess(res.trades[0]["net_pnl"], 0)
 
     def test_take_profit_long_and_short(self):
         up = make_bars([(100, 100, 100, 100), (100, 100, 100, 100), (100, 106, 100, 105), (105, 105, 105, 105)])
-        res, _ = self.run_sim(up, {0: Decision("BUY", take_profit_pct=5)})
+        res, _ = self.run_sim(up, {0: BUY(take_profit_pct=5)})
         self.assertEqual(res.trades[0]["exit_reason"], "take_profit")
         self.assertAlmostEqual(res.trades[0]["exit_price"], 105.0)
         down = make_bars([(100, 100, 100, 100), (100, 100, 100, 100), (100, 100, 94, 95), (95, 95, 95, 95)])
-        res, _ = self.run_sim(down, {0: Decision("SELL", take_profit_pct=5)})
+        res, _ = self.run_sim(down, {0: SELL(take_profit_pct=5)})
         self.assertEqual(res.trades[0]["exit_reason"], "take_profit")
         self.assertAlmostEqual(res.trades[0]["exit_price"], 95.0)
         self.assertGreater(res.trades[0]["net_pnl"], 0)
 
     def test_same_bar_stop_and_take_profit_is_conservative_and_flagged(self):
         bars = make_bars([(100, 100, 100, 100), (100, 100, 100, 100), (100, 110, 90, 100), (100, 100, 100, 100)])
-        res, _ = self.run_sim(bars, {0: Decision("BUY", stop_loss_pct=5, take_profit_pct=5)})
+        res, _ = self.run_sim(bars, {0: BUY(stop_loss_pct=5, take_profit_pct=5)})
         t = res.trades[0]
         self.assertEqual(t["exit_reason"], "stop_loss")
         self.assertTrue(t["ambiguous"])
@@ -164,19 +176,19 @@ class SimulatorTests(unittest.TestCase):
 
     def test_entry_bar_can_trigger_stop(self):
         bars = make_bars([(100, 100, 100, 100), (100, 100, 90, 95), (95, 95, 95, 95)])
-        res, _ = self.run_sim(bars, {0: Decision("BUY", stop_loss_pct=5)})
+        res, _ = self.run_sim(bars, {0: BUY(stop_loss_pct=5)})
         self.assertEqual(res.trades[0]["exit_reason"], "stop_loss")
         self.assertEqual(res.trades[0]["exit_ts"], bars.index[1])
 
     def test_gap_through_stop_fills_at_open_not_stop(self):
         bars = make_bars([(100, 100, 100, 100), (100, 100, 100, 100), (90, 91, 89, 90), (90, 90, 90, 90)])
-        res, _ = self.run_sim(bars, {0: Decision("BUY", stop_loss_pct=2)})
+        res, _ = self.run_sim(bars, {0: BUY(stop_loss_pct=2)})
         self.assertEqual(res.trades[0]["exit_reason"], "stop_gap")
         self.assertEqual(res.trades[0]["exit_price"], 90.0)
 
     def test_gap_through_take_profit_fills_at_open(self):
         bars = make_bars([(100, 100, 100, 100), (100, 100, 100, 100), (110, 111, 109, 110), (110, 110, 110, 110)])
-        res, _ = self.run_sim(bars, {0: Decision("BUY", take_profit_pct=5)})
+        res, _ = self.run_sim(bars, {0: BUY(take_profit_pct=5)})
         self.assertEqual(res.trades[0]["exit_reason"], "take_profit_gap")
         self.assertEqual(res.trades[0]["exit_price"], 110.0)
 
@@ -187,14 +199,14 @@ class SimulatorTests(unittest.TestCase):
     # ---- positions / capital ----
     def test_open_position_closed_at_end_of_data(self):
         bars = make_bars([(100, 100, 100, 100), (100, 100, 100, 100), (100, 100, 100, 110)])
-        res, _ = self.run_sim(bars, {0: Decision("BUY")})
+        res, _ = self.run_sim(bars, {0: BUY()})
         self.assertEqual(res.trades[0]["exit_reason"], "end_of_data")
         self.assertAlmostEqual(res.equity.equity.iloc[-1], 1100.0)
 
     def test_equity_equals_capital_plus_net_trade_pnl(self):
         bars = random_walk(500, seed=5)
         for costs in (FREE, CostModel(5, 8, 4)):
-            res = Simulator(SimConfig(1000, costs, max_exposure=1.5)).run(
+            res = Simulator(SimConfig(1000, costs, max_exposure=1.5, risk=LOOSE)).run(
                 bars, build_strategy("breakout", {"window": 10, "stop_loss_pct": 1.0, "take_profit_pct": 2.0}))
             self.assertGreater(len(res.trades), 5)
             self.assertAlmostEqual(res.equity.equity.iloc[-1], 1000 + sum(t["net_pnl"] for t in res.trades), places=6)
@@ -202,17 +214,17 @@ class SimulatorTests(unittest.TestCase):
 
     def test_max_exposure_limits_notional(self):
         bars = make_bars([(100, 100, 100, 100)] * 4)
-        res, _ = self.run_sim(bars, {0: Decision("BUY")}, max_exposure=0.5)
+        res, _ = self.run_sim(bars, {0: BUY()}, max_exposure=0.5)
         self.assertAlmostEqual(res.orders[0]["notional"], 500.0)
-        res, _ = self.run_sim(bars, {0: Decision("BUY", size=0.5)}, max_exposure=0.5)
+        res, _ = self.run_sim(bars, {0: BUY(size=0.5)}, max_exposure=0.5)
         self.assertAlmostEqual(res.orders[0]["notional"], 250.0)
-        res, _ = self.run_sim(bars, {0: Decision("BUY")}, CostModel(50, 0, 0), max_exposure=1.0)
+        res, _ = self.run_sim(bars, {0: BUY()}, CostModel(50, 0, 0), max_exposure=1.0)
         e = res.orders[0]
         self.assertLessEqual(e["notional"] + e["fee"], 1000.0 + 1e-9)  # fees fit inside budget
 
     def test_insufficient_capital_rejected_and_recorded(self):
         bars = make_bars([(100, 100, 100, 100)] * 4)
-        res, _ = self.run_sim(bars, {0: Decision("BUY")}, capital=0.5, min_notional=1.0)
+        res, _ = self.run_sim(bars, {0: BUY()}, capital=0.5, min_notional=1.0)
         self.assertEqual(res.trades, [])
         self.assertEqual(res.orders[0]["kind"], "rejected")
         self.assertEqual(res.orders[0]["reason"], "insufficient_capital")
@@ -220,20 +232,20 @@ class SimulatorTests(unittest.TestCase):
 
     def test_ruin_halts_trading(self):
         bars = make_bars([(100, 100, 100, 100), (100, 100, 100, 100), (100, 100, 1, 1), (1, 1, 1, 1), (1, 1, 1, 1)])
-        res, _ = self.run_sim(bars, {0: Decision("BUY"), 2: Decision("BUY")}, max_exposure=3.0)
+        res, _ = self.run_sim(bars, {0: BUY(), 2: BUY()}, max_exposure=3.0)
         self.assertIsNotNone(res.halted)
         self.assertGreaterEqual(res.equity.equity.min(), 0.0)
 
     def test_short_disabled_and_same_side_ignored(self):
         bars = make_bars([(100, 100, 100, 100)] * 5)
-        res, _ = self.run_sim(bars, {0: Decision("SELL")}, allow_short=False)
+        res, _ = self.run_sim(bars, {0: SELL()}, allow_short=False)
         self.assertEqual(res.orders[0]["reason"], "short_selling_disabled")
-        res, _ = self.run_sim(bars, {0: Decision("BUY"), 1: Decision("BUY")})
+        res, _ = self.run_sim(bars, {0: BUY(), 1: BUY()})
         self.assertEqual([o["reason"] for o in res.orders if o["kind"] == "rejected"], ["already_positioned"])
 
     def test_reversal_closes_then_opens(self):
         bars = make_bars([(100, 100, 100, 100)] * 5)
-        res, _ = self.run_sim(bars, {0: Decision("BUY"), 1: Decision("SELL")})
+        res, _ = self.run_sim(bars, {0: BUY(), 1: SELL()})
         self.assertEqual(len(res.trades), 2)
         self.assertEqual(res.trades[0]["exit_reason"], "reversal")
         self.assertEqual(res.trades[1]["side"], -1)
@@ -255,8 +267,8 @@ class MetricsTests(unittest.TestCase):
     def test_metrics_known_values(self):
         bars = make_bars([(100, 100, 100, 100), (100, 100, 100, 100), (100, 100, 100, 120),
                           (120, 120, 120, 60), (60, 60, 60, 60)])
-        strat = Scripted({0: Decision("BUY"), 2: Decision("CLOSE")})
-        res = Simulator(SimConfig(1000, FREE)).run(bars, strat)
+        strat = Scripted({0: BUY(), 2: Decision("CLOSE")})
+        res = Simulator(SimConfig(1000, FREE, risk=LOOSE)).run(bars, strat)
         m = compute_metrics(res)
         self.assertEqual(m["trades"], 1)
         self.assertAlmostEqual(m["net_return_pct"], 20.0)
@@ -266,7 +278,7 @@ class MetricsTests(unittest.TestCase):
     def test_max_drawdown(self):
         bars = make_bars([(100, 100, 100, 100), (100, 100, 100, 100), (100, 100, 100, 150),
                           (150, 150, 150, 75), (75, 75, 75, 75)])
-        res = Simulator(SimConfig(1000, FREE)).run(bars, Scripted({0: Decision("BUY")}))
+        res = Simulator(SimConfig(1000, FREE, risk=LOOSE)).run(bars, Scripted({0: BUY()}))
         m = compute_metrics(res)
         self.assertAlmostEqual(m["max_drawdown_pct"], -50.0)
         self.assertAlmostEqual(m["net_return_pct"], -25.0)

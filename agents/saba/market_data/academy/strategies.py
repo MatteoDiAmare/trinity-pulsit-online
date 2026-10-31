@@ -10,6 +10,14 @@ from dataclasses import dataclass
 import numpy as np
 
 ACTIONS = ("BUY", "SELL", "CLOSE", "ABSTAIN")
+DEFAULT_STOP_PCT = 2.0
+
+
+def _mandatory_stop(value):
+    """Every strategy must carry a stop-loss; None/0 is a configuration error, not a default."""
+    if value is None or not 0 < value < 100:
+        raise ValueError("stop_loss_pct is mandatory and must be in (0, 100)")
+    return float(value)
 
 
 @dataclass(frozen=True)
@@ -74,11 +82,11 @@ def _flip(desired: int, position, risk: dict, allow_short: bool, reason: str) ->
 class SmaCross(Strategy):
     name = "sma_cross"
 
-    def __init__(self, short=10, long=30, stop_loss_pct=None, take_profit_pct=None, allow_short=True):
+    def __init__(self, short=10, long=30, stop_loss_pct=DEFAULT_STOP_PCT, take_profit_pct=None, allow_short=True):
         if not 2 <= short < long:
             raise ValueError("require 2 <= short < long")
         self.short, self.long, self.allow_short = int(short), int(long), bool(allow_short)
-        self.sl, self.tp = stop_loss_pct, take_profit_pct
+        self.sl, self.tp = _mandatory_stop(stop_loss_pct), take_profit_pct
 
     def params(self):
         return {"short": self.short, "long": self.long, "stop_loss_pct": self.sl,
@@ -98,11 +106,11 @@ class Breakout(Strategy):
     """Donchian breakout of the previous `window` bars (current bar excluded from the channel)."""
     name = "breakout"
 
-    def __init__(self, window=20, stop_loss_pct=None, take_profit_pct=None, allow_short=True):
+    def __init__(self, window=20, stop_loss_pct=DEFAULT_STOP_PCT, take_profit_pct=None, allow_short=True):
         if window < 2:
             raise ValueError("window must be >= 2")
         self.window, self.allow_short = int(window), bool(allow_short)
-        self.sl, self.tp = stop_loss_pct, take_profit_pct
+        self.sl, self.tp = _mandatory_stop(stop_loss_pct), take_profit_pct
 
     def params(self):
         return {"window": self.window, "stop_loss_pct": self.sl, "take_profit_pct": self.tp,
@@ -125,11 +133,11 @@ class Breakout(Strategy):
 class MeanReversion(Strategy):
     name = "mean_reversion"
 
-    def __init__(self, window=20, z_entry=2.0, stop_loss_pct=None, take_profit_pct=None, allow_short=True):
+    def __init__(self, window=20, z_entry=2.0, stop_loss_pct=DEFAULT_STOP_PCT, take_profit_pct=None, allow_short=True):
         if window < 3 or z_entry <= 0:
             raise ValueError("window >= 3 and z_entry > 0 required")
         self.window, self.z_entry, self.allow_short = int(window), float(z_entry), bool(allow_short)
-        self.sl, self.tp = stop_loss_pct, take_profit_pct
+        self.sl, self.tp = _mandatory_stop(stop_loss_pct), take_profit_pct
 
     def params(self):
         return {"window": self.window, "z_entry": self.z_entry, "stop_loss_pct": self.sl,
@@ -159,11 +167,11 @@ class RandomControl(Strategy):
     """Seeded coin-flip control: any apparent edge of real strategies must beat this."""
     name = "random_control"
 
-    def __init__(self, seed=0, trade_prob=0.02, hold_bars=10, stop_loss_pct=None, take_profit_pct=None):
+    def __init__(self, seed=0, trade_prob=0.02, hold_bars=10, stop_loss_pct=DEFAULT_STOP_PCT, take_profit_pct=None):
         if not 0 <= trade_prob <= 1 or hold_bars < 1:
             raise ValueError("invalid random control parameters")
         self.seed, self.trade_prob, self.hold_bars = int(seed), float(trade_prob), int(hold_bars)
-        self.sl, self.tp = stop_loss_pct, take_profit_pct
+        self.sl, self.tp = _mandatory_stop(stop_loss_pct), take_profit_pct
         self.rng = np.random.default_rng(self.seed)
 
     def params(self):

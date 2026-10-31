@@ -1,0 +1,12 @@
+{
+  "id": "SP500", "symbol": "ES=F", "name": "S&P 500 (E-mini continuous futures proxy)",
+  "asset_class": "equity_index_future", "quote_currency": "USD",
+  "tick_size": 0.25, "min_quantity": 0.01, "quantity_step": 0.01,
+  "costs": {"fee_bps": 0.5, "spread_bps": 1.0, "slippage_bps": 1.0},
+  "max_leverage": 5.0, "broker_max_leverage_assumed": 20.0,
+  "maintenance_margin_fraction": 0.03, "gap_stress_pct": 6.0, "min_stop_pct": 0.1,
+  "trading_hours_per_day": 23.0, "trading_days_per_year": 252,
+  "timezone": "America/New_York",
+  "sessions": "Sun 18:00 - Fri 17:00 ET with a daily 1h break",
+  "notes": "Continuous futures series: contract-roll gaps are not adjusted. Exchange price limits can prevent exits (see stress model). Broker terms unverified."
+}

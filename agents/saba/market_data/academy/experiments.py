@@ -41,7 +41,8 @@ class Split:
 
 def sample_params(name: str, rng: np.random.Generator, seed: int) -> dict:
     """Random-search parameter sampler; the ONLY randomness is the passed generator."""
-    sl = [None, 0.5, 1.0, 2.0][int(rng.integers(0, 4))]
+    sl = [0.5, 1.0, 2.0, 3.0][int(rng.integers(0, 4))]      # stop-loss is mandatory
+    rng.integers(0, 4)                                    # keeps the draw sequence aligned
     tp = [None, 1.0, 2.0, 4.0][int(rng.integers(0, 4))]
     short = bool(rng.integers(0, 2))
     if name == "sma_cross":
@@ -84,8 +85,11 @@ def selection_score(m: dict) -> float:
 
 def _config_dict(symbol, interval, spec, sim_config, split, seed, bars):
     return {"symbol": symbol, "interval": interval, "strategy": spec["strategy"], "params": spec["params"],
-            "seed": seed, "capital": sim_config.capital, "costs": sim_config.costs.as_dict(),
+            "seed": seed, "capital": sim_config.capital, "costs": sim_config.effective_costs.as_dict(),
             "max_exposure": sim_config.max_exposure, "allow_short": sim_config.allow_short,
+            "sim_config": sim_config.to_dict(),
+            "instrument_id": sim_config.instrument.id if sim_config.instrument else None,
+            "instrument_spec_sha256": sim_config.instrument.spec_sha256 if sim_config.instrument else None,
             "split": {"version": SPLIT_VERSION, "train_end_index": split.train_end,
                       "val_end_index": split.val_end,
                       "train_start_utc": bars.index[0].isoformat(),
@@ -176,7 +180,8 @@ def run_final_test(bars: pd.DataFrame, registry: ExperimentRegistry, experiment_
     split = Split(cfg["split"]["train_end_index"], cfg["split"]["val_end_index"])
     if bars.index[split.val_end - 1].isoformat() != cfg["split"]["dev_end_utc"]:
         raise ValueError("archive no longer matches the recorded split (history changed)")
-    sim_config = SimConfig(cfg["capital"], CostModel(**cfg["costs"]), cfg["max_exposure"], allow_short=cfg["allow_short"])
+    sim_config = SimConfig.from_dict(cfg["sim_config"]) if "sim_config" in cfg else SimConfig(
+        cfg["capital"], CostModel(**cfg["costs"]), cfg["max_exposure"], allow_short=cfg["allow_short"])
     spec = {"strategy": cfg["strategy"], "params": cfg["params"]}
     metrics, sim = evaluate_segment(bars, spec, sim_config, split.val_end, len(bars), cfg["interval"], keep_result=True)
     result = sim if keep_result else None
