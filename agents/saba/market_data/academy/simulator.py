@@ -109,12 +109,21 @@ class Simulator:
         self._streak = 0
         self._flatten = None
         self._events, self._shortfall = [], 0.0
-        decisions, orders, trades, equity_rows = [], [], [], []
-        pending: Decision | None = None
-        halted = None
+
+        try:
+            return self._loop(bars, strategy, trade_start, end, arrays, index)
+        finally:
+            close = getattr(strategy, "close", None)
+            if callable(close):
+                close()                   # e.g. terminate an isolated worker process
+
+    def _loop(self, bars, strategy, trade_start, end, arrays, index):
+        cfg = self.cfg
         o, h, l, c = arrays["open"], arrays["high"], arrays["low"], arrays["close"]
         prof = cfg.risk
-
+        decisions, orders, trades, equity_rows = [], [], [], []
+        pending = None
+        halted = None
         for i in range(trade_start, end):
             ts = index[i]
             day = ts.date()

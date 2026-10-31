@@ -24,6 +24,7 @@ from .ledger import LedgerStore, result_payload
 from .simulator import SimConfig, Simulator
 from .strategies import STRATEGIES, build_strategy
 from . import spec_strategy as _spec_strategy  # noqa: F401  (registers the 'spec' strategy)
+from .sandbox import runner as _sandbox_runner  # noqa: F401  (registers the 'sandboxed' strategy)
 
 SPLIT_VERSION = 1
 BUILTIN = ('breakout', 'mean_reversion', 'random_control', 'sma_cross')   # sampled by random search

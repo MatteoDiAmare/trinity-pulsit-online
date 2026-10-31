@@ -29,7 +29,8 @@ from .academy.spec_strategy import validate_spec
 from .academy.strategies import STRATEGIES, build_strategy
 
 FILE_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}\.json$")
-COMMANDS = ("status", "start_cycle", "finish_cycle", "register_hypothesis", "run_hypothesis", "propose_next", "variants",
+CODE_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}\.py$")
+COMMANDS = ("test_strategy", "status", "start_cycle", "finish_cycle", "register_hypothesis", "run_hypothesis", "propose_next", "variants",
             "add_lesson", "search_lessons", "verify_lesson", "notebook", "final_test", "conclude_hypothesis", "halt")
 
 
@@ -63,9 +64,31 @@ def _load_spec(req, strategies_dir: Path) -> dict:
     return validate_spec(req["spec"])
 
 
+def _load_code(item, strategies_dir: Path) -> dict:
+    """Strategy code written by Saba: a plain file name inside <strategies>/code/ (versioned in git) or inline text.
+    It is only validated here; it runs exclusively inside the isolated worker."""
+    if "code_file" in item:
+        name = item["code_file"]
+        if not isinstance(name, str) or not CODE_RE.fullmatch(name):
+            raise ValueError("code_file must be a plain file name like 'momentum.py'")
+        path = Path(strategies_dir) / "code" / name
+        if not path.is_file():
+            raise ValueError(f"code file {name} not found in <strategies>/code/")
+        source = path.read_text(encoding="utf-8")
+    else:
+        source = item.get("code")
+    params = {"code": source, "seed": item.get("seed", 0), "params": item.get("params") or {}}
+    if item.get("limits"):
+        params["limits"] = item["limits"]
+    build_strategy("sandboxed", params)          # policy check only; starts no process
+    return params
+
+
 def _experiment(item, strategies_dir) -> dict:
     if not isinstance(item, dict) or not isinstance(item.get("label"), str) or not item["label"].strip():
         raise ValueError("each experiment needs a label")
+    if "code_file" in item or "code" in item:
+        return {"strategy": "sandboxed", "params": _load_code(item, strategies_dir), "label": item["label"]}
     if "spec" in item or "spec_file" in item:
         return {"strategy": "spec", "params": {"spec": _load_spec(item, strategies_dir)}, "label": item["label"]}
     name = item.get("strategy")
@@ -88,6 +111,25 @@ def handle(req: dict, *, root, strategies_dir, owner_id="local", org_id="persona
     orch = Orchestrator(archive.root, registry, archive, memory, ledger)
     sdir = Path(strategies_dir)
     try:
+        if cmd == "test_strategy":
+            # dry run on DEVELOPMENT data only (first 80 %): policy, causality gate, quick simulation. Records nothing.
+            from .academy.causality import check_causal
+            from .academy.evaluation import compute_metrics
+            from .academy.experiments import Split, evaluate_segment
+            from .academy.instruments import load_instrument
+            from .academy.simulator import SimConfig
+            exp = _experiment({"label": "dry-run", **{k: v for k, v in req.items() if k in ("code", "code_file", "spec", "spec_file", "seed", "params", "limits")}}, sdir)
+            spec = load_instrument(_str(req, "instrument", maxlen=20))
+            interval = req.get("interval", "1d")
+            bars = archive.read(spec.symbol, interval)
+            split = Split.chronological(len(bars))
+            dev = bars.iloc[:split.val_end]
+            cfg = SimConfig(1000.0, instrument=spec, max_exposure=None)
+            gate = check_causal(exp["strategy"], exp["params"], dev, cfg)
+            out = {"ok": True, "policy": "passed", "causality": gate, "data_used": f"first {split.val_end} of {len(bars)} bars (development only)"}
+            if gate["ok"]:
+                out["train"], out["validation"] = (evaluate_segment(dev, exp, cfg, a, b, interval) for a, b in ((0, split.train_end), (split.train_end, split.val_end)))
+            return out
         if cmd == "status":
             return {"ok": True, **orch.status(), "test_windows_consumed_until": orch.test_windows(), "instruments": sorted(available_instruments())}
         if cmd == "start_cycle":
