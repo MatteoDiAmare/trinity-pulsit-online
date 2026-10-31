@@ -1,7 +1,7 @@
 # Saba Academy: autonomous research loop and long-term memory
 
-Status: implemented and tested in this repository. **Not verified inside the running Trinity agent** (`saba-pulsit-online`):
-dependencies in the container, volume mapping, tool registration and the slash command still have to be integrated and tested there.
+Status: implemented and tested in this repository and, in part, in the running Saba container. What is verified there and what is blocked:
+see ACADEMY_INTEGRATION.md. Strategy code isolation: ACADEMY_SANDBOX.md.
 No broker, no live orders. Saba needs no per-experiment approvals; the safeguards are code.
 
 ## Pieces and where they live
@@ -48,8 +48,8 @@ experiments than the cycle has left or than the hypothesis's own trial budget al
   Git holds code and versioned strategy definitions (`strategies/`); results and lessons do not go to git.
 
 ## Not done / known limits
-* Strategies written as arbitrary Python by Saba are **not** supported yet. That needs an isolated runner (no network, no data access,
-  resource limits, AST restrictions) because the causality gate cannot detect side-channel reads. JSON specs are the supported path.
+* Strategies written as Python by Saba run only in the isolated worker described in ACADEMY_SANDBOX.md (bridge: `code_file`, `test_strategy`).
+  It is defence in depth inside one container, not a VM.
 * The analysis is rule-based advice. Judgment (which lesson, which verdict) stays with Saba, but the bridge makes unsupported claims fail.
 * Tests simulate the clock and use synthetic archives; real multi-day operation has not been run.
 * The registry/memory are plain local SQLite files. An agent with shell access to the volume could edit them; this is a research-integrity
