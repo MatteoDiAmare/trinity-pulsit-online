@@ -6,6 +6,11 @@ Run one Academy research cycle. This is simulation research on historical data: 
 You choose the direction, instruments and strategies yourself; no approval is needed for research. The budget and the integrity rules
 are enforced by the bridge, not by this text.
 
+Send `{"command": "help"}` once to get the exact JSON of every command (errors also include the expected usage). `start_cycle` returns a
+briefing (status, notebook, ranking). `register_hypothesis` with `run_in_cycle` registers and runs in one call; `add_lesson` with
+`conclude_hypothesis` closes the hypothesis in the same call. The task has a limited number of turns (about 50): plan the cycle, keep it
+small and always end with `finish_cycle`.
+
 Call the bridge ONLY like this (one JSON object per call, answer is one JSON object):
 
 ~/.local/share/saba/academy-bridge <<'JSON'
@@ -36,8 +41,9 @@ Your own Python strategies
   Every BUY/SELL needs `stop_loss_pct`. Available: `np` (a curated numpy subset), `math`, `statistics`, `rng.uniform()` (seeded).
 - The code runs in an isolated worker with no files, network, secrets or processes, and sees only bars up to now. A restricted subset
   of Python is enforced; the policy error tells you what is not allowed.
-- First call `test_strategy` (`code_file`, `instrument`): it checks the policy and causality and runs a quick simulation on development
-  data only, and records nothing. Then register a hypothesis with `{"label": "...", "code_file": "<name>.py", "params": {...}}`.
+- First call `test_strategy` (`code_file`, `instrument`): it checks the policy and causality and runs a quick simulation on the TRAIN portion
+  only, and records nothing. Validation results exist only through registered experiments; every registered experiment is counted as a trial
+  and raises the luck benchmark, so tune on train and register deliberately. Then register a hypothesis with `{"label": "...", "code_file": "<name>.py", "params": {...}}`.
 - Improve a strategy by editing the file (git keeps the versions) and registering the change as a new hypothesis; the code hash is part of
   every experiment, so results are always traceable to the exact code.
 

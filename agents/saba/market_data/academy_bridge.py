@@ -136,9 +136,10 @@ def handle(req: dict, *, root, strategies_dir, owner_id="local", org_id="persona
                     "register_hypothesis with run_in_cycle runs it at once; add_lesson with conclude_hypothesis closes the hypothesis. "
                     "Errors include the expected usage."}
         if cmd == "test_strategy":
-            # dry run on DEVELOPMENT data only (first 80 %): policy, causality gate, quick simulation. Records nothing.
+            # dry run on the TRAIN portion only (first 60 %): policy, causality gate and a quick simulation. Records nothing.
+            # Validation data is deliberately NOT shown here: tuning against it without counting trials would understate
+            # the luck benchmark. Validation results come only from registered experiments, which are counted.
             from .academy.causality import check_causal
-            from .academy.evaluation import compute_metrics
             from .academy.experiments import Split, evaluate_segment
             from .academy.instruments import load_instrument
             from .academy.simulator import SimConfig
@@ -147,12 +148,14 @@ def handle(req: dict, *, root, strategies_dir, owner_id="local", org_id="persona
             interval = req.get("interval", "1d")
             bars = archive.read(spec.symbol, interval)
             split = Split.chronological(len(bars))
-            dev = bars.iloc[:split.val_end]
+            train = bars.iloc[:split.train_end]
             cfg = SimConfig(1000.0, instrument=spec, max_exposure=None)
-            gate = check_causal(exp["strategy"], exp["params"], dev, cfg)
-            out = {"ok": True, "policy": "passed", "causality": gate, "data_used": f"first {split.val_end} of {len(bars)} bars (development only)"}
+            gate = check_causal(exp["strategy"], exp["params"], train, cfg)
+            out = {"ok": True, "policy": "passed", "causality": gate,
+                   "data_used": f"train portion only: first {split.train_end} of {len(bars)} bars",
+                   "note": "validation results are only available via registered experiments (each counted as a trial)"}
             if gate["ok"]:
-                out["train"], out["validation"] = (evaluate_segment(dev, exp, cfg, a, b, interval) for a, b in ((0, split.train_end), (split.train_end, split.val_end)))
+                out["train"] = evaluate_segment(train, exp, cfg, 0, split.train_end, interval)
             return out
         if cmd == "status":
             return {"ok": True, **orch.status(), "test_windows_consumed_until": orch.test_windows(), "instruments": sorted(available_instruments())}

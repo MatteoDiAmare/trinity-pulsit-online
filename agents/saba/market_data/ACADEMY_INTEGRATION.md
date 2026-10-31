@@ -25,10 +25,29 @@ Checked on 2026-10-31 against the local Trinity (docker) and the container `agen
   placed on a command line), `trinity_api.sh`, `run_one_cycle.sh` (one `/academy-cycle` task, waits, prints her actual tool calls with secrets masked) and
   `register_with_trinity.sh` (schedule created **disabled**; `--enable` only after the first autonomous cycle was verified).
 
+## First autonomous cycles through Trinity (2026-10-31)
+Started with `integration/run_one_cycle.sh` (task `/academy-cycle` on the existing agent `saba`, authenticated with the locally stored token; schedule NOT active).
+* **Cycle 1 - failed by the platform:** 7 min, 39 tool calls, hit Trinity's 50-turn limit (`Task exceeded turn limit`); Trinity stored no log. 13 of 39 calls were errors from guessing
+  field names; the cycle stayed `running`. Even so she registered 6 hypotheses, ran 15 experiments, wrote 7 lessons and used one final test (EUR/USD SMA: validation Sharpe 0.87 vs
+  luck benchmark 0.84 -> final test 0.11, refuted by her own lesson). Her real tool calls were read from her Claude session file in the container.
+* **Fixes from that run:** errors return the exact usage and a `help` command exists; `start_cycle` returns a briefing; `register_hypothesis` can run at once (`run_in_cycle`);
+  `add_lesson` can conclude the hypothesis; cut-off cycles are closed by the next start and still count toward the daily budget; a hypothesis can be `supported` only with a
+  `supported` lesson (hypothesis 2 was left `supported` by the old code although her lesson 4 refutes it; her record was not edited).
+* **Cycle 2 - success:** 12.6 min, 53 tool calls, 6 errors, ended with `finish_cycle` and a report; cost about USD 1.75. She read the notebook (citing lessons from cycle 1), chose a new
+  direction herself, wrote and policy-tested four Python strategies in the sandbox (the sandbox rejected `_direction` and `view.open` with exact reasons), ran three formal experiments plus
+  one final test: streak momentum (GOLD) inconclusive, volume-surge momentum (GOLD) inconclusive, MA pullback (SP500) passed validation (Sharpe 1.20 vs benchmark 1.18) and collapsed in the
+  final test (Sharpe -0.87), refuted. Her conclusion: validation passes are noise-prone, regime dependence, next ideas: regime detection and intraday data.
+* **Saved and reusable:** all 10 lessons verify against the registry, the notebook for later cycles carries them, 9 hypotheses and 10 distinct trials are stored in the volume, her code strategies
+  are committed in her repo, and a redeploy of the Academy code kept all research data.
+* **Loophole found in this run and closed:** she screened parameter variants through `test_strategy`, which showed validation results without counting trials (the registered pullback was
+  the best of several variants), so the luck benchmark was too low. `test_strategy` now shows the train portion only. Also fixed: the policy blocked `view.open` (price data) for strategies.
+
 ## NOT verified / still open
-1. **The first autonomous cycle through Trinity** and the **schedule in Trinity** (needs `trinity_login.sh`, see above). The recurring schedule is intentionally NOT active.
-2. Whether the `schedules:` block in `template.yaml` is applied to an already running agent by Trinity (assumed not; the registration script creates it through the API).
-3. Trinity MCP/tool registration: she is a Claude Code agent and uses the bridge through the Bash tool; no Trinity-side registration exists or was needed.
+1. **The recurring schedule** is intentionally not created or enabled. `integration/register_with_trinity.sh` creates it disabled; `--enable` switches it on.
+2. Whether the `schedules:` block in `template.yaml` is applied to an already running agent by Trinity (assumed not; the script creates it through the API).
+3. A cycle's behaviour under the platform turn limit now relies on the combined commands and her own planning; a longer cycle may still be cut off (cycle 2 used 54 turns and passed, so the
+   limit is evidently not a hard 50 for every run; this was not investigated).
+4. The updated `/academy-cycle` wording (`integration/academy-cycle.md`: help, briefing, train-only dry run) is not yet in her repo; it needs another PR and your approval.
 
 ## Findings about her environment (not changed by me)
 * `~/.mcp.json` is world-readable (mode 644) and contains a Trinity MCP key; it is git-ignored and not on GitHub, but any process in the container can read it.

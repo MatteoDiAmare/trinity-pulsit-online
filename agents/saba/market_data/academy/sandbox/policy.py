@@ -23,7 +23,7 @@ DENIED_ATTRS = {
     "gi_frame", "gi_code", "cr_frame", "cr_code", "ag_frame", "f_back", "f_globals", "f_locals", "f_builtins", "f_code", "tb_frame",
     "tb_next", "co_code", "mro", "format", "format_map", "load", "loads", "dump", "dumps", "tofile", "fromfile", "memmap",
     "ctypes", "data", "base", "random", "testing", "f2py", "distutils", "ctypeslib", "lib", "os", "sys", "system", "popen",
-    "write", "read", "open", "save", "savetxt", "loadtxt", "genfromtxt", "fromstring", "frombuffer", "buffer", "getbuffer",
+    "write", "read", "save", "savetxt", "loadtxt", "genfromtxt", "fromstring", "frombuffer", "buffer", "getbuffer",
 }
 DENIED_NAMES = {"eval", "exec", "compile", "open", "input", "breakpoint", "getattr", "setattr", "delattr", "hasattr", "globals", "locals",
                 "vars", "dir", "type", "object", "super", "memoryview", "bytearray", "bytes", "classmethod", "staticmethod", "property",

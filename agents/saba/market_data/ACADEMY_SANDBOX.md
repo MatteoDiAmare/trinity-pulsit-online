@@ -35,6 +35,8 @@ Available: `np` (curated numpy subset: mean, std, percentile, polyfit, where, ..
   but a native-code or interpreter exploit (e.g. in numpy) is not ruled out. Do not treat it as a boundary against a determined attacker.
 * File reads are blocked by the Python audit hook, not by the kernel filter (seccomp cannot filter by path). In the container, `~/.mcp.json` is
   world-readable and holds a Trinity key; the sandbox keeps strategy code away from it, but the file itself should be protected (see ACADEMY_INTEGRATION.md).
+* `test_strategy` shows TRAIN-period results only. Validation data is reachable solely through registered (counted) experiments; otherwise a strategy can be tuned on
+  validation by repeated dry runs without the trial counter noticing (this happened in Saba's second cycle and was closed afterwards).
 * Linux x86_64 only; other platforms refuse to run strategy code.
 * Allowed numpy functions are a short list; more can be added deliberately in `worker.py`.
 * Per-bar IPC makes sandboxed strategies slower than built-ins (about 1 ms/bar including start-up for daily data; more for compute-heavy code).

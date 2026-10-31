@@ -99,6 +99,11 @@ class PolicyTests(unittest.TestCase):
             with self.assertRaises(PolicyError, msg=label):
                 validate_code(src)
 
+    def test_view_open_is_data_not_a_file(self):
+        validate_code(strat("return Decision('ABSTAIN', reason=str(view.open[-1]))"))
+        with self.assertRaises(PolicyError):
+            validate_code(strat("return open('x')"))                 # the builtin stays forbidden
+
     def test_policy_error_surfaces_as_sandbox_error_before_any_process(self):
         before = children_running()
         with self.assertRaises(SandboxError) as cm:
@@ -188,6 +193,18 @@ class BehaviourTests(unittest.TestCase):
         res = Simulator(SimConfig()).run(bars, SandboxedStrategy(code), trade_start=3200)
         n, total = res.decisions[-1]["reason"].split(":")
         self.assertEqual((int(n), int(total)), (3000, 3299))
+
+    def test_gap_strategy_can_use_the_open_price(self):
+        code = strat("if position is None and view.n > 2 and view.open[-1] > view.close[-2] * 1.001:\n    return Decision('BUY', stop_loss_pct=2.0, reason='gap up')\nreturn None")
+        bars = self.bars.copy()
+        bars.iloc[::7, bars.columns.get_loc("Open")] *= 1.004           # synthetic overnight gaps (the fixture has none)
+        bars["High"] = bars[["High", "Open"]].max(axis=1)
+        res = Simulator(SimConfig()).run(bars, SandboxedStrategy(code))
+        self.assertTrue(any(d["reason"] == "gap up" for d in res.decisions))
+        o, c = bars["Open"].to_numpy(), bars["Close"].to_numpy()
+        for i, d in enumerate(res.decisions):
+            if d["reason"] == "gap up":
+                self.assertGreater(o[i], c[i - 1] * 1.001)
 
     def test_causality_and_reproducibility(self):
         report = check_causal("sandboxed", SandboxedStrategy(SMA).params(), self.bars)
@@ -335,8 +352,9 @@ class ProvenanceAndIntegrationTests(unittest.TestCase):
         call = lambda req: academy_bridge.handle(req, root=root, strategies_dir=sdir)
         out = call({"command": "test_strategy", "code_file": "sma_momentum.py", "instrument": "GOLD", "params": {"fast": 8, "slow": 25}})
         self.assertTrue(out["causality"]["ok"])
-        self.assertIn("first 560 of 700", out["data_used"])
-        self.assertEqual(out["validation"]["shortfall"], 0.0)
+        self.assertIn("train portion only: first 420 of 700", out["data_used"])
+        self.assertEqual(out["train"]["shortfall"], 0.0)
+        self.assertNotIn("validation", out)                    # tuning on validation without counting trials is not possible here
         reg = call({"command": "register_hypothesis", "statement": "own momentum code", "family": "momentum", "trial_budget": 4,
                     "instruments": ["GOLD"], "experiments": [{"label": "mom", "code_file": "sma_momentum.py", "params": {"fast": 8, "slow": 25}}]})
         self.assertEqual(reg["cells"], 1)
