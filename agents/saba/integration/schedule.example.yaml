@@ -1,0 +1,11 @@
+# EXAMPLE for the operational agent's template/schedule configuration (saba-pulsit-online). Not applied by this repo.
+# 4 cycles per day matches the default budget (max_cycles_per_day: 4); the bridge refuses extra cycles regardless.
+schedules:
+  - name: Academy research cycle
+    cron: "0 */6 * * *"
+    message: "/academy-cycle"
+    timezone: "UTC"
+    enabled: true
+# Persistent data (registry, ledgers, memory, notebook, halt file, budget) must live on the agent's persistent volume:
+# set SABA_MARKET_DATA_DIR to a path under the declared data_paths (e.g. /home/developer/data/saba) and, since containers
+# usually have no git, SABA_CODE_VERSION to the deployed commit.

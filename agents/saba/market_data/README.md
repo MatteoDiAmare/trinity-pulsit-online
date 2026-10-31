@@ -45,3 +45,4 @@ Integration into the **running Trinity container** requires installing the depen
 
 Deterministic historical trading simulator with cost model, stop-loss/take-profit, train/validation/final-test protocol and seeded experiments: see [ACADEMY.md](ACADEMY.md).
 Run logs and private JSON export (Supabase Auth): see [ACADEMY_EXPORT.md](ACADEMY_EXPORT.md).
+Autonomous research loop, memory and agent bridge: see [ACADEMY_AUTONOMY.md](ACADEMY_AUTONOMY.md).
