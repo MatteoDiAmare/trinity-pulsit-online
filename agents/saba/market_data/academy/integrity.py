@@ -10,7 +10,8 @@ Mechanisms (all enforced in code, none depend on the agent's discipline):
   never re-run or re-counted; the stored result is reused.
 * Trial counting - every distinct experiment on a market/interval is counted; the selection is
   compared with the Sharpe that pure luck would reach after that many trials.
-* Code version   - git commit (and dirty flag) is recorded with every experiment.
+* Code version   - SABA_CODE_VERSION, else the ACADEMY_CODE_VERSION stamp written by the deploy script, else the
+                   git commit (and dirty flag); recorded with every experiment.
 """
 from __future__ import annotations
 
@@ -35,6 +36,11 @@ def code_version() -> str:
     if env:
         return env
     here = Path(__file__).resolve().parent
+    stamp = here.parents[1] / "ACADEMY_CODE_VERSION"      # written by the deploy script when no .git is present
+    if stamp.is_file():
+        text = stamp.read_text(encoding="utf-8").strip()
+        if text:
+            return text
     try:
         head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=here, capture_output=True, text=True, timeout=10)
         if head.returncode != 0:

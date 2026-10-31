@@ -169,3 +169,19 @@ class IntegrityTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipIf(pd is None, "optional market-data dependencies not installed")
+class CodeVersionStampTests(unittest.TestCase):
+    def test_stamp_file_is_used_when_present(self):
+        from market_data.academy import integrity
+        stamp = Path(integrity.__file__).resolve().parents[2] / "ACADEMY_CODE_VERSION"
+        self.assertFalse(stamp.exists())
+        integrity.code_version.cache_clear()
+        stamp.write_text("abc1234deploy\n")
+        try:
+            self.assertEqual(integrity.code_version(), "abc1234deploy")
+        finally:
+            stamp.unlink()
+            integrity.code_version.cache_clear()
+        self.assertNotEqual(integrity.code_version(), "abc1234deploy")

@@ -1,0 +1,123 @@
+{
+  "symbol": "GC=F",
+  "source_interval": "1m",
+  "raw_bars": 7903,
+  "timeframes": {
+    "1m": {
+      "completed_at_utc": "2026-10-30T21:00:00+00:00",
+      "bars": 7903,
+      "structure": "mixed",
+      "last_close": 3884.89990234375,
+      "last_patterns": [
+        "bearish"
+      ],
+      "range_to_prior_atr": 0.8427885919537541,
+      "relative_volume": 0.8034433285509326,
+      "close_above_prior_range": false,
+      "close_below_prior_range": false,
+      "assessments": {
+        "bearish": {
+          "status": "insufficient_evidence",
+          "supporting_evidence": [
+            "volatility_within_baseline_limit"
+          ],
+          "conflicts": [],
+          "missing_context": [
+            "event_calendar",
+            "spread",
+            "directional_structure"
+          ],
+          "note": "Descriptive educational classification only; no forecast or order."
+        }
+      },
+      "uncertainties": [
+        "No verified bid/ask spread or executable depth in archived OHLC",
+        "No point-in-time economic event calendar",
+        "Yahoo futures volume provenance/contract roll must be verified before volume-based claims",
+        "Context consistency is not a forecast or demonstrated trading edge"
+      ]
+    },
+    "5m": {
+      "completed_at_utc": "2026-10-30T21:00:00+00:00",
+      "bars": 1575,
+      "structure": "bullish",
+      "last_close": 3884.89990234375,
+      "last_patterns": [
+        "bearish"
+      ],
+      "range_to_prior_atr": 0.5336168172675068,
+      "relative_volume": 0.449283140381814,
+      "close_above_prior_range": false,
+      "close_below_prior_range": false,
+      "assessments": {
+        "bearish": {
+          "status": "contradicted",
+          "supporting_evidence": [
+            "volatility_within_baseline_limit"
+          ],
+          "conflicts": [
+            "counter_to_confirmed_structure"
+          ],
+          "missing_context": [
+            "event_calendar",
+            "spread"
+          ],
+          "note": "Descriptive educational classification only; no forecast or order."
+        }
+      },
+      "uncertainties": [
+        "No verified bid/ask spread or executable depth in archived OHLC",
+        "No point-in-time economic event calendar",
+        "Yahoo futures volume provenance/contract roll must be verified before volume-based claims",
+        "Context consistency is not a forecast or demonstrated trading edge"
+      ]
+    },
+    "15m": {
+      "completed_at_utc": "2026-10-30T21:00:00+00:00",
+      "bars": 520,
+      "structure": "mixed",
+      "last_close": 3884.89990234375,
+      "last_patterns": [
+        "bullish"
+      ],
+      "range_to_prior_atr": 0.7392458563445264,
+      "relative_volume": 0.39877817963757656,
+      "close_above_prior_range": false,
+      "close_below_prior_range": false,
+      "assessments": {
+        "bullish": {
+          "status": "insufficient_evidence",
+          "supporting_evidence": [
+            "volatility_within_baseline_limit"
+          ],
+          "conflicts": [],
+          "missing_context": [
+            "event_calendar",
+            "spread",
+            "directional_structure"
+          ],
+          "note": "Descriptive educational classification only; no forecast or order."
+        }
+      },
+      "uncertainties": [
+        "No verified bid/ask spread or executable depth in archived OHLC",
+        "No point-in-time economic event calendar",
+        "Yahoo futures volume provenance/contract roll must be verified before volume-based claims",
+        "Context consistency is not a forecast or demonstrated trading edge"
+      ]
+    }
+  },
+  "hypotheses": [
+    {
+      "question": "Does pattern + confirmed structure improve forward outcomes versus pattern alone?",
+      "test": "Chronological walk-forward with matched session controls and transaction costs",
+      "falsifier": "No incremental out-of-sample performance"
+    },
+    {
+      "question": "Does prior-normalized range expansion predict persistence after costs?",
+      "test": "Compare range-expansion buckets to same-session null entries",
+      "falsifier": "Effect vanishes on untouched periods or under plausible costs"
+    }
+  ],
+  "execution": "disabled — research only"
+}
