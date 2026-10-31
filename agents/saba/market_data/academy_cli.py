@@ -53,7 +53,6 @@ def main(argv=None):
     t.add_argument("--control-runs", type=int, default=30)
     f = sub.choices["final-test"]
     f.add_argument("--experiment-id", type=int, required=True)
-    f.add_argument("--force", action="store_true")
     f.add_argument("--ledger-dir", help="Write trades/decisions/equity CSVs here")
     args = p.parse_args(argv)
     if args.command == "train" and not 1 <= args.experiments <= 10_000:
@@ -82,7 +81,7 @@ def main(argv=None):
                                experiments=args.experiments, seed=args.seed, sim_config=cfg,
                                control_runs=args.control_runs, ledger=ledger)
         else:
-            out, result = run_final_test(bars, registry, args.experiment_id, force=args.force, keep_result=True, ledger=ledger)
+            out, result = run_final_test(bars, registry, args.experiment_id, keep_result=True, ledger=ledger)
             if args.ledger_dir:
                 import pandas as pd
                 d = Path(args.ledger_dir)

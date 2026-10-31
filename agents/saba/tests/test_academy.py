@@ -375,7 +375,8 @@ class ExperimentTests(unittest.TestCase):
         self.assertEqual(res["final_test"]["bars"], len(self.bars) - split.val_end)
         with self.assertRaises(ValueError):
             run_final_test(self.bars, reg, exp_id)
-        run_final_test(self.bars, reg, exp_id, force=True)
+        with self.assertRaises(TypeError):
+            run_final_test(self.bars, reg, exp_id, force=True)      # no override exists
         with self.assertRaises(ValueError):
             run_final_test(self.bars, reg, out["summary_experiment_id"])
         reg.close()

@@ -68,6 +68,27 @@ Limits of this protection: it is a simulation. It cannot prove that a real broke
 negative balances; exchange price limits or halts can stop trading altogether; financing/swap, FX conversion of the account currency and
 contract-roll adjustment are not modelled.
 
+## Research integrity: protecting the final test without manual approvals
+
+Saba needs no per-experiment approval; the final test is protected by code (`academy/integrity.py`), recorded in the registry:
+
+* **No override, one test per experiment.** `final-test` has no `--force`; a consumed experiment cannot be retested.
+* **Window budget:** at most 3 different experiments may be confirmed on the same test window (`FINAL_TESTS_PER_WINDOW`);
+  the next one is refused (`test window exhausted`).
+* **Test frontier:** a final test consumes its whole window. Later training treats those bars as development data, but the NEW
+  final-test window must start after the last consumed bar and contain >= 20 fresh bars; otherwise training refuses
+  (`no fresh final-test window ... wait for more data`). A window overlapping an already consumed one is refused at test time.
+  So the cadence of honest confirmations is set by how fast new market data arrives.
+* **Spec hash and dedupe:** an experiment is identified by sha256(strategy, params, full sim config incl. instrument spec, dev data hash,
+  split, code version). Identical experiments are reused, never re-run or re-counted (`reused_experiments`).
+* **Trial counting:** every distinct experiment per market/interval is counted (`trials_total_on_market`); the training summary reports
+  `noise_benchmark_sharpe` - the Sharpe the best of that many zero-edge strategies would reach by luck - and whether the selection
+  exceeds it. This is an approximation, not a formal deflated Sharpe.
+* **Code version:** git commit (+`+dirty`) is stored with every experiment (`SABA_CODE_VERSION` overrides, e.g. in a container without git).
+
+Limits: the registry is local and Saba could in principle edit it; this is a research-integrity guard, not a security boundary.
+The frontier is per symbol/interval, so the same bars seen through a different interval are not protected.
+
 ## Protocol
 
 * Chronological split 60 % train / 20 % validation / 20 % final test (by bar count).
