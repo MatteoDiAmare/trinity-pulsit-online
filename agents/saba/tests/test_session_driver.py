@@ -32,6 +32,8 @@ class World:
         end = e.get("terminated_at") or self.t
         return min((end - e["start"]).total_seconds() / 60, self.task_minutes)
 
+    fail_with = None
+
     def api(self, method, path, body=None):
         self.calls.append((method, path))
         if method == "POST" and path.endswith("/task"):
@@ -47,6 +49,8 @@ class World:
         if method == "GET":
             eid = path.split("/")[-1]
             e = self.execs[eid]
+            if self.fail_with:
+                return {"status": "failed", "error": self.fail_with, "cost": None}
             done = self.minutes_run(e) >= self.task_minutes or "terminated_at" in e
             if not done:
                 return {"status": "running"}
@@ -152,6 +156,20 @@ class GuardTests(unittest.TestCase):
         out = w.run(minutes=25, cap=0)
         self.assertEqual(out["tasks"], 2)                       # 10 + 10 min, 5 min left < 10
         self.assertIn("min left", out["reason"])
+
+    def test_subscription_limit_stops_the_session_instead_of_looping(self):
+        w = World(task_minutes=10, rate=0.1)
+        w.fail_with = "Subscription usage limit: You've hit your session limit"
+        out = w.run(minutes=87.5)
+        self.assertEqual(out["tasks"], 1)
+        self.assertIn("SUBSCRIPTION LIMIT", out["reason"])
+
+    def test_repeated_instant_failures_stop_the_session(self):
+        w = World(task_minutes=10, rate=0.1)
+        w.fail_with = "agent crashed"
+        out = w.run(minutes=87.5)
+        self.assertEqual(out["tasks"], 3)
+        self.assertIn("consecutive tasks failed immediately", out["reason"])
 
     def test_driver_only_uses_task_and_execution_endpoints(self):
         w = World(task_minutes=10, rate=0.1)

@@ -119,7 +119,7 @@ def run_session(a, deps):
         fh.flush()
 
     log(event="session_start", end=end.isoformat(timespec="seconds"), minutes=a.minutes, max_turns=a.max_turns, max_cost_usd=a.max_cost_usd)
-    n, spent, stop_reason = 0, 0.0, "time"
+    n, spent, stop_reason, quick_fails = 0, 0.0, "time", 0
     while True:
         remaining = (end - deps["now"]()).total_seconds()
         if not can_launch(spent, a.max_cost_usd):
@@ -190,6 +190,14 @@ def run_session(a, deps):
             response_tail=(ex.get("response") or "")[-1500:])
         if why == "cost_cap":
             stop_reason = f"COST CAP reached during task {n}: ${spent:.2f} >= ${a.max_cost_usd:.2f}"
+            break
+        err = (ex.get("error") or "").lower()
+        if "usage limit" in err or "session limit" in err or "rate limit" in err:
+            stop_reason = f"SUBSCRIPTION LIMIT: {(ex.get('error') or '')[:160]}"      # not something to retry in a loop
+            break
+        quick_fails = quick_fails + 1 if (status == "failed" and minutes < 1.0) else 0
+        if quick_fails >= 3:
+            stop_reason = f"{quick_fails} consecutive tasks failed immediately: {(ex.get('error') or '')[:160]}"
             break
     log(event="session_end", tasks=n, reason=stop_reason, spent_usd=round(spent, 2), elapsed_minutes=round((deps["now"]() - start).total_seconds() / 60, 1))
     return {"tasks": n, "spent": spent, "reason": stop_reason}
