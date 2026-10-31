@@ -1,5 +1,6 @@
 import gzip
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -66,6 +67,49 @@ class ExportTests(unittest.TestCase):
         other = LedgerStore(self.root, "someone-else", "acme")
         with self.assertRaises(ValueError):
             run_final_test(self.bars, self.reg, self.store.experiments()[0], ledger=other)
+
+    def test_write_period_checks_ownership(self):
+        eid = self.store.experiments()[0]
+        before = (self.root / "academy_runs" / str(eid) / "train.json.gz").read_bytes()
+        payload = self.store.read_period(eid, "train")
+        for intruder in (LedgerStore(self.root, "intruder", "acme"), LedgerStore(self.root, UUID, "other-org")):
+            with self.assertRaises(ValueError):
+                intruder.write_period(eid, "train", {"decisions": []})
+            with self.assertRaises(ValueError):
+                intruder.write_period(eid, "validation", payload)
+            with self.assertRaises(ValueError):
+                intruder.read_period(eid, "train")
+            with self.assertRaises(ValueError):
+                intruder.read_meta(eid)
+            with self.assertRaises(ValueError):
+                intruder.periods(eid)
+        self.assertEqual((self.root / "academy_runs" / str(eid) / "train.json.gz").read_bytes(), before)
+
+    def test_write_period_requires_existing_meta_and_valid_period(self):
+        with self.assertRaises(ValueError):
+            self.store.write_period(987654, "train", {})          # no meta yet
+        self.assertFalse((self.root / "academy_runs" / "987654").exists())
+        with self.assertRaises(ValueError):
+            self.store.write_period(self.store.experiments()[0], "../evil", {})
+
+    def test_tampered_meta_without_ownership_is_refused(self):
+        iso = self.root / "tamper"
+        store = LedgerStore(iso, UUID, "acme")
+        d = iso / "academy_runs" / "555"
+        d.mkdir(parents=True)
+        (d / "meta.json").write_text(json.dumps({"experiment_id": 555}))
+        with self.assertRaises(ValueError):
+            store.write_period(555, "train", {})
+        (d / "meta.json").write_text(json.dumps({"owner_id": UUID, "org_id": "acme", "domain": "holdings"}))
+        with self.assertRaises(ValueError):
+            store.write_period(555, "train", {})
+        self.assertEqual(store.experiments(), [])      # foreign-domain ledgers are not even listed
+
+    def test_summary_refuses_other_owner(self):
+        self.store.write_summary(7001, {"x": 1})
+        with self.assertRaises(ValueError):
+            LedgerStore(self.root, "intruder", "acme").write_summary(7001, {"x": 2})
+        self.assertEqual(LedgerStore(self.root, UUID, "acme").summaries()[-1]["x"], 1)
 
     def test_ledger_refuses_to_overwrite_other_owner(self):
         eid = self.store.experiments()[0]
@@ -177,14 +221,64 @@ class ExportTests(unittest.TestCase):
         row = self.reg.db.execute("SELECT MIN(id) FROM experiments").fetchone()[0]
         self.assertIsNotNone(row)
 
-    def test_storage_policy_is_private_and_read_only(self):
+    def test_storage_policy_structure(self):
         sql = SQL.read_text().lower()
-        self.assertIn("public = false", sql.replace("'academy-exports', 'academy-exports', false", "public = false"))
-        self.assertIn("for select to authenticated", sql)
-        self.assertIn("auth.uid()", sql)
-        self.assertIn("'simulation'", sql)
-        for forbidden in ("for insert", "for update", "for delete", "for all", "to anon", "to public"):
-            self.assertNotIn(forbidden, sql)
+        self.assertIn("public = false", sql)
+        self.assertIn("'application/json'", sql)
+        # exactly one permissive grant: select, authenticated only
+        permissive = re.findall(r"create policy \"[^\"]+\" on storage\.objects\s+as permissive for (\w+) to ([^\n]+?)\n", sql)
+        self.assertEqual(permissive, [("select", "authenticated")])
+        # restrictive guards cover select/insert/update/delete for anon+authenticated
+        guards = re.findall(r"as restrictive for (\w+) to anon, authenticated", sql)
+        self.assertEqual(sorted(guards), ["delete", "insert", "select", "update"])
+        self.assertNotIn("to public", sql)
+        self.assertNotIn("for all", sql)
+        self.assertIn("security definer", sql)
+        self.assertIn("set search_path = ''", sql)
+        self.assertIn("revoke all on function public.academy_export_path_ok(text) from public", sql)
+        self.assertEqual(sql.count("drop policy if exists"), sql.count("create policy"))   # idempotent
+
+    def _path_regex(self, uid):
+        text = SQL.read_text()
+        m = re.search(r"object_name ~ \('(\^v1[^']+)' \|\| auth\.uid\(\)::text \|\| '([^']+)'\)", text)
+        self.assertIsNotNone(m, "path validation regex not found in SQL")
+        return re.compile(m.group(1) + re.escape(uid) + m.group(2))
+
+    def test_policy_regex_accepts_exporter_paths_and_rejects_bad_ones(self):
+        rx = self._path_regex(UUID)
+        info = export_all(self.store, self.root / "pol", generated_at="2026-01-01T00:00:00+00:00")
+        root = Path(info["path"]).parents[5]    # the --out directory
+        count = 0
+        for p in Path(info["path"]).rglob("*.json"):
+            self.assertTrue(rx.search(p.relative_to(root).as_posix()), p)
+            count += 1
+        self.assertGreater(count, 10)
+        base = f"v1/simulation/orgs/acme/users/{UUID}"
+        for ok in (f"{base}/manifest.json", f"{base}/experiments/3/validation/trades.json"):
+            self.assertTrue(rx.search(ok), ok)
+        bad = [f"v1/simulation/orgs/acme/users/{UUID.replace('1','2',1)}/manifest.json",   # other uid
+               f"v2/simulation/orgs/acme/users/{UUID}/manifest.json",                         # wrong version
+               f"v1/portfolio/orgs/acme/users/{UUID}/manifest.json",                          # other namespace
+               f"v1/simulation/orgs/acme/users/{UUID}/../x/manifest.json",                    # traversal
+               f"v1/simulation/orgs/acme/users/{UUID}/a..b.json",
+               f"v1/simulation/orgs/acme/users/{UUID}//manifest.json",                        # empty segment
+               f"v1/simulation/orgs/acme/users/{UUID}/manifest.json.exe",
+               f"v1/simulation/orgs/acme/users/{UUID}/manifest.csv",
+               f"v1/simulation/orgs/acme/users/{UUID}",                                        # no file
+               f"v1/simulation/orgs/ac me/users/{UUID}/manifest.json",
+               f"v1/simulation/orgs/{'a'*65}/users/{UUID}/manifest.json",
+               f"x/v1/simulation/orgs/acme/users/{UUID}/manifest.json",                        # prefix smuggling
+               f"v1/simulation/orgs/acme/users/{UUID}x/manifest.json",                         # uid prefix match
+               f"v1/simulation/orgs/acme/extra/users/{UUID}/manifest.json"]
+        for b in bad:
+            self.assertFalse(rx.search(b), b)
+
+    def test_audit_script_is_read_only(self):
+        audit = (SQL.parent / "002_academy_audit_storage_policies.sql").read_text().lower()
+        code = "\n".join(l for l in audit.splitlines() if not l.strip().startswith("--"))
+        for word in ("insert ", "update ", "delete ", "drop ", "create ", "alter ", "grant ", "revoke "):
+            self.assertNotIn(word, code)
+        self.assertIn("pg_policies", code)
 
 
 if __name__ == "__main__":

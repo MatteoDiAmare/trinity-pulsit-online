@@ -93,19 +93,34 @@ class LedgerStore:
         _atomic_write(self._dir(experiment_id) / "meta.json",
                       json.dumps(jsonable(meta), sort_keys=True, allow_nan=False).encode())
 
+    def _require_owner(self, experiment_id: int) -> dict:
+        """Return the experiment's meta only if it exists and belongs to this owner/org."""
+        path = self._dir(experiment_id) / "meta.json"
+        if not path.is_file():
+            raise ValueError("no ledger metadata for this experiment; write_meta must come first")
+        meta = json.loads(path.read_text())
+        if (meta.get("owner_id"), meta.get("org_id"), meta.get("domain")) != (self.owner_id, self.org_id, "simulation"):
+            raise ValueError("experiment ledger belongs to another owner/org (or lacks ownership metadata)")
+        return meta
+
     def write_period(self, experiment_id: int, period: str, payload: dict):
         if period not in PERIODS:
             raise ValueError(f"unknown period {period}")
+        self._require_owner(experiment_id)
         raw = json.dumps(jsonable(payload), sort_keys=True, allow_nan=False).encode()
         _atomic_write(self._dir(experiment_id) / f"{period}.json.gz", gzip.compress(raw, mtime=0))
 
     def read_meta(self, experiment_id: int) -> dict:
-        return json.loads((self._dir(experiment_id) / "meta.json").read_text())
+        return self._require_owner(experiment_id)
 
     def read_period(self, experiment_id: int, period: str) -> dict:
+        self._require_owner(experiment_id)
+        if period not in PERIODS:
+            raise ValueError(f"unknown period {period}")
         return json.loads(gzip.decompress((self._dir(experiment_id) / f"{period}.json.gz").read_bytes()))
 
     def periods(self, experiment_id: int) -> list[str]:
+        self._require_owner(experiment_id)
         return [p for p in PERIODS if (self._dir(experiment_id) / f"{p}.json.gz").is_file()]
 
     def experiments(self) -> list[int]:
@@ -113,11 +128,16 @@ class LedgerStore:
         out = []
         for d in sorted(self.root.glob("*/meta.json"), key=lambda p: int(p.parent.name)):
             m = json.loads(d.read_text())
-            if m.get("owner_id") == self.owner_id and m.get("org_id") == self.org_id:
+            if (m.get("owner_id"), m.get("org_id"), m.get("domain")) == (self.owner_id, self.org_id, "simulation"):
                 out.append(int(d.parent.name))
         return out
 
     def write_summary(self, summary_id: int, summary: dict):
+        existing = self.root / "summaries" / f"{int(summary_id)}.json"
+        if existing.is_file():
+            old = json.loads(existing.read_text())
+            if (old.get("owner_id"), old.get("org_id")) != (self.owner_id, self.org_id):
+                raise ValueError("summary belongs to another owner/org; refusing to overwrite")
         _atomic_write(self.root / "summaries" / f"{int(summary_id)}.json",
                       json.dumps(jsonable({**summary, "owner_id": self.owner_id, "org_id": self.org_id,
                                            "domain": "simulation"}), sort_keys=True, allow_nan=False).encode())

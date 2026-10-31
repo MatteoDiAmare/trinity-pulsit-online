@@ -66,14 +66,34 @@ Every file is an envelope:
 
 ## 3. Access: private Supabase Storage (not public)
 
-1. Create the bucket and policies from `market_data/academy/sql/001_academy_private_storage.sql` (**review first; not applied by any code**).
-   Bucket `academy-exports` is private; policy allows `select` for `authenticated` users only on
-   `v1/simulation/orgs/<org>/users/<their own auth.uid()>/…` and only if they have a row in `academy_memberships` for that org.
+1. Review and run `market_data/academy/sql/001_academy_private_storage.sql` (idempotent; **not applied by any code**), then
+   `002_academy_audit_storage_policies.sql` (read-only) and its manual checklist. Add yourself once:
+   `insert into public.academy_memberships(user_id, org_id) values ('<your-auth-uid>', 'personal');` (single operator; no admin UI).
 2. Upload as the operator with a service-role key that stays **outside** the browser, Lovable and this repo, e.g.
-   `supabase storage cp -r <path>/v1 ss:///academy-exports/` (or a small script using `supabase-py`).
-   Authenticated users get no write policy.
+   `supabase storage cp -r <path>/v1 ss:///academy-exports/`. Clients cannot write.
 3. Use your Supabase user UUID as `--owner-id` so the folder name equals `auth.uid()`.
-4. Add yourself once: `insert into academy_memberships(user_id, org_id, role) values ('<uuid>', 'personal', 'owner');`
+
+### How the policy is hardened
+* **Whole-path validation** in one function, `public.academy_export_path_ok(name)`:
+  `^v1/simulation/orgs/<org: [A-Za-z0-9_-]{1,64}>/users/<auth.uid()>(/[A-Za-z0-9_-]+)+\.json$` **and** a membership row for that org.
+  This fixes the version, namespace, `orgs`/`users` keywords, org format, owner and file type, and forbids `..`, `//`, extra dots,
+  other extensions and uid-prefix matches. The previous policy only compared two folder names.
+  `SECURITY DEFINER`, `search_path=''`, `coalesce(..., false)` so anonymous callers get `false`, never an error or NULL.
+* **Other policies on `storage.objects`:** Postgres ORs permissive policies, so any broad policy (an old "authenticated can read all", an
+  anon/public policy, or one allowing insert/update/delete) would silently widen access. 001 adds **RESTRICTIVE** guards (AND-ed with all
+  permissive ones) for select/insert/update/delete on `anon, authenticated`: reads require the valid own path; client writes are always
+  denied for this bucket; other buckets are unaffected (`bucket_id <> 'academy-exports' or …`). The service role bypasses RLS and keeps uploading.
+* **Bucket settings:** `public=false` (a public bucket bypasses RLS for downloads), JSON only, 50 MB limit.
+* **Audit:** `002_...sql` lists all storage policies, RLS state, BYPASSRLS roles and table grants, plus 5 manual denial checks
+  (anon, second user, wrong uid/org, client writes, signed/public URL).
+* Tests extract the actual regex from the SQL and check it against every path the exporter produces and a list of malicious paths.
+  **They cannot execute Postgres RLS**; confirm with the audit script in your own project.
+
+### Ledger ownership (code side)
+`LedgerStore` now checks ownership (`owner_id`, `org_id`, `domain=simulation` in the experiment's `meta.json`) on **every** write and read:
+`write_period` requires existing, matching metadata (so a period file can neither be created for an unknown experiment nor overwritten by another
+owner/org, nor by a ledger lacking ownership fields); `read_period`, `read_meta`, `periods` and `experiments()` apply the same rule; summaries
+cannot be overwritten across owners.
 
 ## 4. Lovable client (design)
 
