@@ -176,12 +176,18 @@ class CodeVersionStampTests(unittest.TestCase):
     def test_stamp_file_is_used_when_present(self):
         from market_data.academy import integrity
         stamp = Path(integrity.__file__).resolve().parents[2] / "ACADEMY_CODE_VERSION"
-        self.assertFalse(stamp.exists())
+        previous = stamp.read_text() if stamp.exists() else None      # a deployed copy already carries a stamp
         integrity.code_version.cache_clear()
         stamp.write_text("abc1234deploy\n")
         try:
             self.assertEqual(integrity.code_version(), "abc1234deploy")
         finally:
-            stamp.unlink()
+            if previous is None:
+                stamp.unlink()
+            else:
+                stamp.write_text(previous)
             integrity.code_version.cache_clear()
-        self.assertNotEqual(integrity.code_version(), "abc1234deploy")
+        if previous is None:
+            self.assertNotEqual(integrity.code_version(), "abc1234deploy")
+        else:
+            self.assertEqual(integrity.code_version(), previous.strip())

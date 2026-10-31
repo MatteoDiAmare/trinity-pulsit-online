@@ -16,14 +16,16 @@ trap 'rm -rf "$STAGE"' EXIT
 git -C "$REPO_ROOT" archive "$SHA" agents/saba | tar -x -C "$STAGE"
 echo "$SHA" > "$STAGE/agents/saba/ACADEMY_CODE_VERSION"
 tar -C "$STAGE/agents" -cf "$STAGE/academy.tar" saba
-docker cp "$STAGE/academy.tar" "$CONTAINER:/tmp/academy.tar"
+CHOME="$(docker exec "$CONTAINER" bash -c 'echo $HOME')"      # /tmp in agent containers is a tmpfs that `docker cp` cannot write to
+docker exec "$CONTAINER" mkdir -p "$CHOME/.tmp"
+docker cp "$STAGE/academy.tar" "$CONTAINER:$CHOME/.tmp/academy.tar"
 docker exec -i "$CONTAINER" bash -s <<'INNER'
 set -euo pipefail
 BASE="$HOME/.local/share/saba"
 mkdir -p "$BASE" "$BASE/market_data"
 rm -rf "$BASE/academy.new" && mkdir "$BASE/academy.new"
-tar -xf /tmp/academy.tar -C "$BASE/academy.new" --strip-components=1
-rm -f /tmp/academy.tar
+tar -xf "$HOME/.tmp/academy.tar" -C "$BASE/academy.new" --strip-components=1
+rm -f "$HOME/.tmp/academy.tar"
 [ -d "$BASE/venv" ] || python3 -m venv --system-site-packages "$BASE/venv"
 "$BASE/venv/bin/python" -m pip install --quiet --disable-pip-version-check "pyarrow>=17" "yfinance>=0.2.65,<2"
 rm -rf "$BASE/academy.old"
