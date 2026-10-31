@@ -38,7 +38,7 @@ def load(root, baseline: dict, owner="local", org="personal", upper: int | None 
     reg = sqlite3.connect(f"file:{root / 'experiments.sqlite3'}?mode=ro", uri=True)
     store = LedgerStore(root, owner, org)
     out = []
-    for row in _rows(reg, "SELECT id,name,configuration_json,results_json FROM experiments WHERE id>? AND id<=? ORDER BY id",
+    for row in _rows(reg, "SELECT id,name,created_at_utc,configuration_json,results_json FROM experiments WHERE id>? AND id<=? ORDER BY id",
                      (baseline["max_registry_id"], upper if upper is not None else 10**12)):
         cfg, res = json.loads(row["configuration_json"]), json.loads(row["results_json"])
         if not row["name"].startswith("academy:") or "params" not in cfg or row["name"] == "academy:final_test":
@@ -49,7 +49,7 @@ def load(root, baseline: dict, owner="local", org="personal", upper: int | None 
         except ValueError:
             continue
         label = cfg.get("label") or cfg["strategy"]
-        out.append({"id": eid, "strategy": cfg["strategy"], "label": label, "symbol": cfg["symbol"], "interval": cfg["interval"],
+        out.append({"id": eid, "created_at": row["created_at_utc"], "strategy": cfg["strategy"], "label": label, "symbol": cfg["symbol"], "interval": cfg["interval"],
                     "instrument": cfg.get("instrument_id"), "config": cfg, "results": res, "periods": periods,
                     "trial_number": res.get("trial_number_on_market")})
     reg.close()
@@ -113,6 +113,60 @@ def random_null(bars: pd.DataFrame, cfg: SimConfig, start, end, interval: str, r
             "trades_mean": float(np.nanmean(a[:, 4]))}
 
 
+def spearman(x, y):
+    x, y = np.asarray(x, float), np.asarray(y, float)
+    if len(x) < 4 or np.std(x) == 0 or np.std(y) == 0:
+        return None
+    rx, ry = pd.Series(x).rank().to_numpy(), pd.Series(y).rank().to_numpy()
+    return float(np.corrcoef(rx, ry)[0, 1])
+
+
+def permutation_p(x, y, n=5000, seed=3):
+    """Two-sided permutation p-value for the Spearman correlation between order and outcome."""
+    rho = spearman(x, y)
+    if rho is None:
+        return None, None
+    rng = np.random.default_rng(seed)
+    y = np.asarray(y, float)
+    hits = sum(abs(spearman(x, rng.permutation(y)) or 0) >= abs(rho) for _ in range(n))
+    return rho, float((hits + 1) / (n + 1))
+
+
+def improvement_analysis(val_rows: list[dict]) -> dict:
+    """Is validation performance getting better over the session? Per experiment (the unit of research), in order of creation."""
+    val_rows = sorted(val_rows, key=lambda r: r["id"])
+    order = list(range(len(val_rows)))
+    hit = [r["hit_rate"] if r["hit_rate"] is not None else np.nan for r in val_rows]
+    exp_ = [r["expectancy"] if r["expectancy"] is not None else np.nan for r in val_rows]
+    shp = [r["sharpe"] if r["sharpe"] is not None else np.nan for r in val_rows]
+    exc = [(r["sharpe"] - r["luck_benchmark_sharpe"]) if (r["sharpe"] is not None and r["luck_benchmark_sharpe"] is not None) else np.nan for r in val_rows]
+    def trend(y):
+        ok = [i for i in order if not np.isnan(y[i])]
+        rho, p = permutation_p([order[i] for i in ok], [y[i] for i in ok]) if len(ok) >= 6 else (None, None)
+        return {"n": len(ok), "spearman_rho": rho, "p_two_sided": p}
+    out = {"experiments": len(val_rows), "hit_rate_trend": trend(hit), "expectancy_trend": trend(exp_), "sharpe_trend": trend(shp), "excess_over_luck_trend": trend(exc)}
+    k = len(val_rows) // 3
+    if k >= 2:
+        first, last = val_rows[:k], val_rows[-k:]
+        tr = lambda rs: [t["net_pnl"] for r in rs for t in r["_trades"]]
+        a, b = np.array(tr(first)), np.array(tr(last))
+        if len(a) > 5 and len(b) > 5:
+            rng = np.random.default_rng(2)
+            d = b[rng.integers(0, len(b), (4000, len(b)))].mean(1) - a[rng.integers(0, len(a), (4000, len(a)))].mean(1)
+            pa, pb = (a > 0).mean(), (b > 0).mean()
+            pp = ((a > 0).sum() + (b > 0).sum()) / (len(a) + len(b))
+            se = math.sqrt(pp * (1 - pp) * (1 / len(a) + 1 / len(b))) or float("nan")
+            z = (pb - pa) / se
+            out["first_vs_last_third"] = {"experiments_each": k, "trades_first": len(a), "trades_last": len(b), "hit_first": float(pa), "hit_last": float(pb),
+                                          "hit_diff": float(pb - pa), "hit_p_two_sided": float(math.erfc(abs(z) / math.sqrt(2))) if math.isfinite(z) else None,
+                                          "expectancy_first": float(a.mean()), "expectancy_last": float(b.mean()), "expectancy_diff": float(b.mean() - a.mean()),
+                                          "expectancy_diff_ci95": [float(np.percentile(d, 2.5)), float(np.percentile(d, 97.5))]}
+    nulls = [(r["sharpe"], r["null"]["sharpe_p95"]) for r in val_rows if r["sharpe"] is not None and r["null"]]
+    out["share_above_random_p95"] = float(np.mean([s_ > p95 for s_, p95 in nulls])) if nulls else None
+    out["share_above_luck_benchmark"] = float(np.mean([e_ > 0 for e_ in exc if not np.isnan(e_)])) if any(not np.isnan(e_) for e_ in exc) else None
+    return out
+
+
 # ---------------------------------------------------------------- report
 def build_report(root, baseline: dict, *, random_runs: int = 100, owner="local", org="personal", transcript_text: str | None = None) -> dict:
     root = Path(root)
@@ -143,7 +197,7 @@ def build_report(root, baseline: dict, *, random_runs: int = 100, owner="local",
             nb = e["results"].get("trial_number_on_market")
             from .integrity import expected_max_noise_sharpe
             luck = expected_max_noise_sharpe(nb, m["bars"], bpy) if (nb and p == "validation") else None
-            rows.append({"id": e["id"], "label": e["label"], "strategy": e["strategy"], "symbol": e["symbol"], "instrument": e["instrument"],
+            rows.append({"id": e["id"], "created_at": e["created_at"], "label": e["label"], "strategy": e["strategy"], "symbol": e["symbol"], "instrument": e["instrument"],
                          "period": p, "start": str(start)[:10], "end": str(end)[:10], **st, "net_return_pct": m["net_return_pct"],
                          "sharpe": m["sharpe_annualized"], "max_dd_pct": m["max_drawdown_pct"], "bh_return_pct": bh["return_pct"],
                          "bh_sharpe": bh["sharpe"], "luck_benchmark_sharpe": luck, "null": null_cache.get(key), "trial_number": nb,
@@ -217,13 +271,31 @@ def build_report(root, baseline: dict, *, random_runs: int = 100, owner="local",
         for line in transcript_text.splitlines():
             if re.search(r"\bL\d+\b|dead end|prior|earlier|benchmark|final test|refuted|pattern", line, re.I) and len(line.strip()) > 30:
                 excerpts.append(line.strip()[:420])
+    cyc_all = _rows(mem2 := sqlite3.connect(f"file:{root / 'academy_memory.sqlite3'}?mode=ro", uri=True), "SELECT id,started_at,status FROM cycles ORDER BY started_at")
+    mem2.close()
+    def cycle_of(created_at):
+        c = [x["id"] for x in cyc_all if x["started_at"] <= created_at]
+        return c[-1] if c else None
+    by_cycle = {}
+    for r in rows:
+        r["cycle"] = cycle_of(r["created_at"])
+    for cid in sorted({r["cycle"] for r in val if r["cycle"] is not None} if False else {r["cycle"] for r in rows if r["cycle"] is not None}):
+        vsel = [r for r in rows if r["cycle"] == cid and r["period"] == "validation"]
+        tsel = [r for r in rows if r["cycle"] == cid and r["period"] == "train"]
+        vt, tt = [t for r in vsel for t in r["_trades"]], [t for r in tsel for t in r["_trades"]]
+        exs = [r["sharpe"] - r["luck_benchmark_sharpe"] for r in vsel if r["sharpe"] is not None and r["luck_benchmark_sharpe"] is not None]
+        by_cycle[cid] = {"experiments": len(vsel), "val_trades": len(vt), "val_hit_rate": trade_stats(vt)["hit_rate"], "val_expectancy": trade_stats(vt)["expectancy"],
+                         "train_hit_rate": trade_stats(tt)["hit_rate"], "train_expectancy": trade_stats(tt)["expectancy"],
+                         "mean_val_sharpe": float(np.mean([r["sharpe"] for r in vsel if r["sharpe"] is not None])) if vsel else None,
+                         "mean_excess_over_luck": float(np.mean(exs)) if exs else None, "best_val_sharpe": max([r["sharpe"] for r in vsel if r["sharpe"] is not None], default=None)}
+    improvement = improvement_analysis(val)
     clean_rows = [{k: v for k, v in r.items() if k != "_trades"} for r in rows]
     return {"baseline": baseline, "experiments": len(exps), "experiments_by_label": {k: sum(1 for e in exps if e["label"] == k) for k in sorted({e["label"] for e in exps})},
             "experiments_by_symbol": {k: sum(1 for e in exps if e["symbol"] == k) for k in sorted({e["symbol"] for e in exps})},
             "rows": clean_rows, "by_period": by_period, "overall": overall, "by_strategy": strategies, "trend": trend, "final_tests": finals,
             "lessons": lessons, "hypotheses": hyps, "cycles": cycles, "citations": cites, "random_runs": random_runs,
             "final_test_experiments": sum(1 for r in rows if r["period"] == "final_test"), "comparison_to_pre_session": comparison,
-            "narration_excerpts": excerpts[:30]}
+            "narration_excerpts": excerpts[:30], "by_cycle": by_cycle, "improvement": improvement}
 
 
 # ---------------------------------------------------------------- rendering
@@ -278,6 +350,23 @@ def render_markdown(rep: dict) -> str:
     for k in ("first_half", "second_half"):
         d = t[k]
         P(f"| {k} | {d['experiments']} | {d['trades']} | {_f(d['hit_rate'], 0, True)} | {_f(d['expectancy'])} | {_f(d['mean_sharpe'])} | {_f(d['mean_excess_over_luck'])} | {_f(d['share_above_luck'], 0, True)} |")
+    P("\n**Validation per cycle** (hit rate / expectancy per trade; train in brackets shows the in-sample gap)\n")
+    P("| cycle | experiments | val trades | val hit rate | val expectancy | train hit rate | train expectancy | mean val Sharpe | mean excess over luck | best val Sharpe |\n|---|---|---|---|---|---|---|---|---|---|")
+    for cid, d in rep["by_cycle"].items():
+        P(f"| {cid} | {d['experiments']} | {d['val_trades']} | {_f(d['val_hit_rate'], 0, True)} | {_f(d['val_expectancy'])} | {_f(d['train_hit_rate'], 0, True)} | "
+          f"{_f(d['train_expectancy'])} | {_f(d['mean_val_sharpe'])} | {_f(d['mean_excess_over_luck'])} | {_f(d['best_val_sharpe'])} |")
+    im = rep["improvement"]
+    P("\n**Trend over the session** (one point per validation experiment, in creation order; Spearman rho with a permutation test)\n")
+    P("| outcome | n | rho | p (two-sided) |\n|---|---|---|---|")
+    for k, label in (("hit_rate_trend", "hit rate"), ("expectancy_trend", "expectancy/trade"), ("sharpe_trend", "Sharpe"), ("excess_over_luck_trend", "Sharpe minus luck benchmark")):
+        t_ = im[k]
+        P(f"| {label} | {t_['n']} | {_f(t_['spearman_rho'])} | {_f(t_['p_two_sided'], 3)} |")
+    if "first_vs_last_third" in im:
+        f = im["first_vs_last_third"]
+        P(f"\nFirst third vs last third of the validation experiments ({f['experiments_each']} experiments each): hit rate {_f(f['hit_first'], 0, True)} ({f['trades_first']} trades) -> "
+          f"{_f(f['hit_last'], 0, True)} ({f['trades_last']}), difference {_f(f['hit_diff'], 1, True)}, p = {_f(f['hit_p_two_sided'], 3)}; expectancy/trade {_f(f['expectancy_first'])} -> "
+          f"{_f(f['expectancy_last'])}, difference {_f(f['expectancy_diff'])}, 95% CI [{_f(f['expectancy_diff_ci95'][0])}, {_f(f['expectancy_diff_ci95'][1])}].")
+    P(f"\nShare of validation experiments above the luck benchmark: {_f(im['share_above_luck_benchmark'], 0, True)}; above the random-control 95th percentile: {_f(im['share_above_random_p95'], 0, True)}.")
     c = rep["comparison_to_pre_session"]
     if "hit_rate_p_two_sided" in c:
         pre, ses = c["pre_session_validation"], c["session_validation"]

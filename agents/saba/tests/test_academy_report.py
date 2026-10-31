@@ -120,6 +120,40 @@ class ReportTests(unittest.TestCase):
             self.assertIn(heading, md)
         json.dumps(rep, default=str)                               # serialisable
 
+    def test_improvement_analysis_detects_a_real_trend_and_not_noise(self):
+        from market_data.academy.report import improvement_analysis, permutation_p, spearman
+        def row(i, hit, exp_):
+            return {"id": i, "hit_rate": hit, "expectancy": exp_, "sharpe": exp_, "luck_benchmark_sharpe": 1.0, "null": {"sharpe_p95": 0.5},
+                    "_trades": [{"net_pnl": exp_ + (1 if k % 2 else -1)} for k in range(20)]}
+        rising = [row(i, 0.3 + 0.02 * i, -1 + 0.2 * i) for i in range(20)]
+        r = improvement_analysis(rising)
+        self.assertGreater(r["hit_rate_trend"]["spearman_rho"], 0.95)
+        self.assertLess(r["expectancy_trend"]["p_two_sided"], 0.01)
+        self.assertGreater(r["first_vs_last_third"]["expectancy_diff"], 2.0)
+        self.assertGreater(r["first_vs_last_third"]["expectancy_diff_ci95"][0], 0)
+        rng = np.random.default_rng(0)
+        noise = [row(i, float(rng.uniform(0.3, 0.6)), float(rng.normal(0, 1))) for i in range(24)]
+        n = improvement_analysis(noise)
+        self.assertGreater(n["expectancy_trend"]["p_two_sided"], 0.05)
+        self.assertLessEqual(n["first_vs_last_third"]["expectancy_diff_ci95"][0], 0 <= n["first_vs_last_third"]["expectancy_diff_ci95"][1] or 1)
+        self.assertEqual(spearman([1, 2, 3], [1, 2, 3]), None)                                    # too few points
+        self.assertIsNone(permutation_p([1, 1, 1, 1], [1, 2, 3, 4])[0])                              # constant order
+        self.assertEqual(improvement_analysis([])["experiments"], 0)
+
+    def test_per_cycle_table_follows_the_cycle_start_times(self):
+        import sqlite3
+        eids = [r[0] for r in self.reg.db.execute("SELECT id FROM experiments WHERE name LIKE 'academy:%' AND name NOT IN ('academy:train_summary','academy:final_test')")]
+        stamps = [r[0] for r in self.reg.db.execute("SELECT created_at_utc FROM experiments WHERE id IN (%s) ORDER BY id" % ",".join(map(str, eids)))]
+        self.mem.db.execute("INSERT INTO cycles(id,started_at,status) VALUES (1,'2000-01-01T00:00:00+00:00','done')")
+        self.mem.db.execute("INSERT INTO cycles(id,started_at,status) VALUES (2,?, 'done')", (stamps[-1],))
+        self.mem.db.commit()
+        rep = build_report(self.root, self.zero, random_runs=0)
+        self.assertEqual(set(rep["by_cycle"]), {1, 2})
+        self.assertGreater(rep["by_cycle"][1]["experiments"], 0)
+        md = render_markdown(rep)
+        self.assertIn("Validation per cycle", md)
+        self.assertIn("Trend over the session", md)
+
     def test_empty_session_is_reported_without_errors(self):
         far = {**self.zero, "max_registry_id": 10 ** 6}
         rep = build_report(self.root, far, random_runs=0)
