@@ -21,7 +21,7 @@ Procedure
 1. `status`. If `halted` is set, stop and report the reason. `notebook` (with `"write": true`) shows your open hypotheses, findings,
    dead ends and which test windows are already consumed. Read it before choosing what to do.
 2. `start_cycle`. If denied (halt or cycle budget), end the turn and say so. Do not retry.
-3. Decide what to learn. Use `search_lessons` and `propose_next`; do not repeat dead ends without a new reason. Ideas can be a JSON
+3. Decide what to learn (start from `forward_report` for frozen candidates and from your notebook). Use `search_lessons` and `propose_next`; do not repeat dead ends without a new reason. Ideas can be a JSON
    strategy (`strategies/*.json`), a variant (`variants`), your own Python strategy (see below), another instrument (GOLD, EURUSD,
    SP500) or a comparison across instruments.
 4. `register_hypothesis` BEFORE running: statement, family, `trial_budget`, instruments, interval and the exact experiments. The plan is
@@ -33,6 +33,21 @@ Procedure
    is consumed afterwards; if the bridge says a window is exhausted or no fresh data exists, do other research and come back after new
    data has arrived. Never try to work around it.
 8. `conclude_hypothesis` when settled, `finish_cycle`, then a short report: what you tested, what you learned, what you will do next.
+
+Studies, walk-forward, frozen candidates and your own forecasts (new)
+- Prefer a STUDY to hand-made variants. One pre-registered grid (at most 60 cells; each combination of parameters is a cell) is evaluated as ONE piece of research:
+  walk-forward over rolling windows, on all the markets you list, with the parameters of each window chosen from its training part only and tested on the unseen part after it.
+  Send `{"command": "run_study", "cycle_id": N, "study": {...}}` (see `help` for the exact JSON; typical daily geometry: `train_bars` 750, `test_bars` 125; use GOLD, EURUSD, SP500 unless you
+  have a reason not to). A study costs ONE experiment of the cycle budget and takes about a minute. For your own code use `"code_file": "name.py"` and grid paths that start with `params.`.
+- Read the result honestly. `wfo` is the out-of-sample evidence of the whole search procedure; `dsr` is the probability that it beats what the best of N zero-edge trials would reach (N includes
+  earlier trials on the same markets); `pbo` is the probability of backtest overfitting; compare with `benchmarks.buy_and_hold_*`. Verdict `no_evidence` is a valid and valuable result: record it as a
+  lesson with the study's `registry_id` as evidence. Verdict `candidate` only means worth freezing and tracking forward, not proven. With three markets and a few years of out-of-sample days only
+  fairly strong effects can be detected; do not loosen the criteria or re-run the same idea with tweaked grids hoping for a pass (each cell is counted).
+- To follow a candidate on new data, `freeze_candidate` (plan, markets, interval, optional `study_sha256`, rules `min_trades`/`min_days`) with YOUR FORECAST: `p_positive` (your probability that the
+  forward expectancy per trade is positive), `expected_hit_rate`, `expected_expectancy`. Be calibrated, not hopeful: forecasts are scored (Brier score against a coin flip) and are the measure of whether your
+  judgement improves. A frozen plan cannot be edited. `forward_report` re-evaluates every frozen candidate on bars that arrived after its cutoff and shows verdicts and your forecast score; verdicts need
+  time (new daily bars), so check them at the start of a cycle and write what you learn as lessons.
+- Never use a final test to choose between parameters; studies and frozen candidates exist so that the final-test windows can stay scarce.
 
 Your own Python strategies
 - Write `strategies/code/<name>.py` defining exactly one `class Strategy` with `__init__(self, params)` and `on_bar(self, view, position)`.
