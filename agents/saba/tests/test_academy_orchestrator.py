@@ -87,6 +87,19 @@ class OrchestratorTests(Base):
         self.clock.advance(hours=13)                       # first cycle is now > 24 h old
         self.assertEqual(o.start_cycle()["cycles_used_24h"], 2)
 
+    def test_cut_off_cycle_is_closed_by_the_next_start_but_still_counts(self):
+        o = self.orch(max_seconds_per_cycle=60, max_cycles_per_day=4)
+        first = o.start_cycle()["cycle_id"]
+        self.assertEqual(o._cycle(first)["status"], "running")
+        self.clock.advance(seconds=30)
+        second = o.start_cycle()["cycle_id"]
+        self.assertEqual(o._cycle(first)["status"], "running")          # younger than the time budget: left alone
+        self.clock.advance(seconds=120)
+        third = o.start_cycle()
+        self.assertEqual(o._cycle(first)["status"], "abandoned")
+        self.assertEqual(o._cycle(second)["status"], "abandoned")
+        self.assertEqual(third["cycles_used_24h"], 3)                    # cut-off cycles still count toward the daily budget
+
     def test_kill_switch_blocks_and_only_operator_resumes(self):
         o = self.orch()
         cyc = o.start_cycle()["cycle_id"]
@@ -341,6 +354,39 @@ class BridgeTests(Base):
             self.call({"command": "final_test", "experiment_id": 99999})
         st = self.call({"command": "status"})
         self.assertIsNotNone(st["test_windows_consumed_until"]["GOLD"])
+
+    def test_help_start_briefing_and_combined_steps(self):
+        usage = self.call({"command": "help"})
+        self.assertIn("register_hypothesis", usage["commands"])
+        self.assertIn("run_in_cycle", usage["commands"]["register_hypothesis"])
+        started = self.call({"command": "start_cycle"})
+        b = started["briefing"]
+        self.assertEqual(b["status"]["budget"]["max_experiments_per_cycle"], 20)
+        self.assertIn("Saba research notebook", b["notebook"])
+        reg = self.call({"command": "register_hypothesis", "statement": "combined", "family": "trend", "trial_budget": 4,
+                         "instruments": ["GOLD"], "run_in_cycle": started["cycle_id"],
+                         "experiments": [{"label": "sma", "strategy": "sma_cross", "params": {"short": 5, "long": 20}}]})
+        self.assertEqual(reg["run"]["new_experiments"], 1)
+        eid = reg["run"]["report"]["market_data"]["GOLD"]["experiment_ids"][0]
+        les = self.call({"command": "add_lesson", "hypothesis_id": reg["hypothesis_id"], "claim": "no durable edge", "verdict": "inconclusive",
+                         "confidence": 0.2, "evidence": [{"experiment_id": eid}], "scope": {"market": "GOLD"}, "conclude_hypothesis": "inconclusive"})
+        self.assertEqual(les["hypothesis_status"], "inconclusive")
+        with self.assertRaises(ValueError):                              # 'supported' without a supported lesson is refused
+            self.call({"command": "conclude_hypothesis", "hypothesis_id": reg["hypothesis_id"], "status": "supported"})
+        # a registration whose run is refused still stands and reports why
+        denied = self.call({"command": "register_hypothesis", "statement": "too big", "family": "trend", "trial_budget": 50,
+                            "instruments": ["GOLD", "EURUSD"], "run_in_cycle": started["cycle_id"],
+                            "experiments": [{"label": f"s{i}", "strategy": "sma_cross", "params": {"short": 3 + i, "long": 20 + i}} for i in range(11)]})
+        self.assertIn("run_error", denied)
+        self.assertTrue(denied["hypothesis_id"])
+
+    def test_errors_carry_the_expected_usage(self):
+        code, out = self.main({"command": "add_lesson", "claim": "x"})
+        self.assertEqual(code, 1)
+        self.assertIn("usage", out)
+        self.assertIn("evidence", out["usage"])
+        code, out = self.main({"command": "nope"})
+        self.assertNotIn("usage", out)
 
     def test_process_interface_exit_codes(self):
         code, out = self.main({"command": "status"})

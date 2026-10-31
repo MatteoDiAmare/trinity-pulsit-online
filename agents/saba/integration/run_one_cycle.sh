@@ -2,7 +2,7 @@
 # Starts ONE /academy-cycle task on the existing Saba through Trinity, waits for it, and prints her actual trace.
 # Does not create or enable any schedule. Needs a prior integration/trinity_login.sh.
 set -euo pipefail
-HERE="$(cd "$(dirname "$0")" && pwd)"; AGENT="${AGENT:-saba-pulsit-online}"; API="$HERE/trinity_api.sh"
+HERE="$(cd "$(dirname "$0")" && pwd)"; AGENT="${AGENT:-saba}"; API="$HERE/trinity_api.sh"
 echo "agent: $("$API" GET "/api/agents/$AGENT" | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d.get("name"),d.get("status"))')"
 resp="$("$API" POST "/api/agents/$AGENT/task" '{"message":"/academy-cycle","async_mode":true}')"
 eid="$(printf '%s' "$resp" | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d.get("execution_id") or d.get("id") or "")')"

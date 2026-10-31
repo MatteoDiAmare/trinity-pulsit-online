@@ -89,6 +89,9 @@ class Orchestrator:
         if h:
             raise CycleDenied(f"halted: {h.get('reason')}")
         now = self.clock()
+        # a cycle that was cut off (e.g. by the platform's turn limit) must not stay 'running' forever
+        stale = (now - timedelta(seconds=self.budget.max_seconds_per_cycle)).isoformat()
+        self.memory.db.execute("UPDATE cycles SET status='abandoned', finished_at=? WHERE status='running' AND started_at < ?", (now.isoformat(), stale))
         since = (now - timedelta(hours=24)).isoformat()
         n = self.memory.db.execute("SELECT COUNT(*) FROM cycles WHERE started_at > ?", (since,)).fetchone()[0]
         if n >= self.budget.max_cycles_per_day:

@@ -5,7 +5,7 @@
 #   integration/register_with_trinity.sh --enable   # only after the first autonomous cycle has been verified
 # Env: AGENT (default saba-pulsit-online), CRON (default "0 */6 * * *")
 set -euo pipefail
-HERE="$(cd "$(dirname "$0")" && pwd)"; API="$HERE/trinity_api.sh"; AGENT="${AGENT:-saba-pulsit-online}"; CRON="${CRON:-0 */6 * * *}"
+HERE="$(cd "$(dirname "$0")" && pwd)"; API="$HERE/trinity_api.sh"; AGENT="${AGENT:-saba}"; CRON="${CRON:-0 */6 * * *}"
 ENABLED=false; [ "${1:-}" = "--enable" ] && ENABLED=true
 sched="$("$API" GET "/api/agents/$AGENT/schedules")"
 id="$(printf '%s' "$sched" | python3 -c 'import json,sys;print(" ".join(s["id"] for s in json.load(sys.stdin) if s["name"]=="Academy research cycle"))')"

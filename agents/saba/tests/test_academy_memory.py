@@ -64,6 +64,23 @@ class ResearchMemoryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.mem.spend_trials(999, 1)
 
+    def test_supported_hypothesis_needs_a_supported_lesson(self):
+        hid = self.mem.register_hypothesis("s", "f", 5, PLAN)
+        with self.assertRaises(ValueError) as cm:
+            self.mem.set_status(hid, "supported")
+        self.assertIn("supported", str(cm.exception))
+        self.lesson(hypothesis_id=hid, verdict="candidate")
+        with self.assertRaises(ValueError):
+            self.mem.set_status(hid, "supported")                       # a candidate is not enough
+        good = self.final()
+        self.lesson(hypothesis_id=hid, verdict="supported", confidence=0.7,
+                    evidence=[{"experiment_id": self.val_id}, {"experiment_id": good}])
+        self.mem.set_status(hid, "supported")
+        self.assertEqual(self.mem.hypothesis(hid)["status"], "supported")
+        other = self.mem.register_hypothesis("t", "f", 5, PLAN)
+        self.mem.set_status(other, "inconclusive")
+        self.assertEqual(self.mem.hypothesis(other)["status"], "inconclusive")
+
     def test_status_and_children(self):
         a = self.mem.register_hypothesis("parent", "f", 5, PLAN)
         b = self.mem.register_hypothesis("child", "f", 5, PLAN, parent_id=a)

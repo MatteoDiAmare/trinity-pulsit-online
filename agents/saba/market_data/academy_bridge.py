@@ -30,7 +30,27 @@ from .academy.strategies import STRATEGIES, build_strategy
 
 FILE_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}\.json$")
 CODE_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}\.py$")
-COMMANDS = ("test_strategy", "status", "start_cycle", "finish_cycle", "register_hypothesis", "run_hypothesis", "propose_next", "variants",
+USAGE = {
+    "start_cycle": {"command": "start_cycle"},
+    "register_hypothesis": {"command": "register_hypothesis", "statement": "text", "family": "trend", "trial_budget": 4,
+                            "instruments": ["GOLD", "EURUSD"], "interval": "1d",
+                            "experiments": [{"label": "a", "strategy": "sma_cross", "params": {"short": 10, "long": 30}},
+                                            {"label": "b", "spec_file": "ema_trend.json"},
+                                            {"label": "c", "code_file": "my_strategy.py", "params": {}}],
+                            "run_in_cycle": "<cycle_id: registers AND runs in one call>", "parent_id": "optional"},
+    "run_hypothesis": {"command": "run_hypothesis", "cycle_id": 1, "hypothesis_id": 1},
+    "add_lesson": {"command": "add_lesson", "hypothesis_id": 1, "claim": "text", "verdict": "refuted|candidate|inconclusive|supported",
+                   "confidence": 0.5, "evidence": [{"experiment_id": 3}], "scope": {"market": "GOLD", "interval": "1d"},
+                   "tags": "optional", "conclude_hypothesis": "optional: refuted|inconclusive|abandoned|supported"},
+    "conclude_hypothesis": {"command": "conclude_hypothesis", "hypothesis_id": 1, "status": "refuted|inconclusive|abandoned|supported (needs a supported lesson)"},
+    "final_test": {"command": "final_test", "experiment_id": 3},
+    "finish_cycle": {"command": "finish_cycle", "cycle_id": 1},
+    "search_lessons": {"command": "search_lessons", "text": "optional", "verdict": "optional", "market": "optional", "limit": 20},
+    "variants": {"command": "variants", "spec_file": "ema_trend.json", "n": 3, "seed": 1},
+    "test_strategy": {"command": "test_strategy", "code_file": "my_strategy.py", "instrument": "GOLD", "params": {}},
+    "halt": {"command": "halt", "reason": "text"},
+}
+COMMANDS = ("help", "test_strategy", "status", "start_cycle", "finish_cycle", "register_hypothesis", "run_hypothesis", "propose_next", "variants",
             "add_lesson", "search_lessons", "verify_lesson", "notebook", "final_test", "conclude_hypothesis", "halt")
 
 
@@ -111,6 +131,10 @@ def handle(req: dict, *, root, strategies_dir, owner_id="local", org_id="persona
     orch = Orchestrator(archive.root, registry, archive, memory, ledger)
     sdir = Path(strategies_dir)
     try:
+        if cmd == "help":
+            return {"ok": True, "commands": USAGE, "tips": "start_cycle returns a briefing (status, notebook, ranking). Combine steps: "
+                    "register_hypothesis with run_in_cycle runs it at once; add_lesson with conclude_hypothesis closes the hypothesis. "
+                    "Errors include the expected usage."}
         if cmd == "test_strategy":
             # dry run on DEVELOPMENT data only (first 80 %): policy, causality gate, quick simulation. Records nothing.
             from .academy.causality import check_causal
@@ -133,7 +157,11 @@ def handle(req: dict, *, root, strategies_dir, owner_id="local", org_id="persona
         if cmd == "status":
             return {"ok": True, **orch.status(), "test_windows_consumed_until": orch.test_windows(), "instruments": sorted(available_instruments())}
         if cmd == "start_cycle":
-            return {"ok": True, **orch.start_cycle()}
+            started = orch.start_cycle()
+            status = {**orch.status(), "test_windows_consumed_until": orch.test_windows()}
+            return {"ok": True, **started, "briefing": {"status": status, "ranking": orch.propose_next(),
+                                                        "notebook": memory.notebook(status=status, max_chars=5000),
+                                                        "usage": "send {'command':'help'} for exact JSON of every command"}}
         if cmd == "finish_cycle":
             return {"ok": True, **orch.finish_cycle(_int(req, "cycle_id"))}
         if cmd == "register_hypothesis":
@@ -149,8 +177,14 @@ def handle(req: dict, *, root, strategies_dir, owner_id="local", org_id="persona
             plan = {"experiments": [_experiment(e, sdir) for e in exps], "instruments": instruments, "interval": req.get("interval", "1d")}
             hid = memory.register_hypothesis(_str(req, "statement"), _str(req, "family", maxlen=80), _int(req, "trial_budget"), plan,
                                              _int(req, "parent_id", optional=True))
-            return {"ok": True, "hypothesis_id": hid, "cells": len(plan["experiments"]) * len(instruments),
-                    "preregistered_sha256": memory.hypothesis(hid)["preregistered_sha256"]}
+            out = {"ok": True, "hypothesis_id": hid, "cells": len(plan["experiments"]) * len(instruments),
+                   "preregistered_sha256": memory.hypothesis(hid)["preregistered_sha256"]}
+            if req.get("run_in_cycle") is not None:
+                try:
+                    out["run"] = orch.run_hypothesis(_int(req, "run_in_cycle"), hid)
+                except (ValueError, CycleDenied) as exc:        # registration stands; the run can be retried or the plan dropped
+                    out["run_error"] = str(exc)
+            return out
         if cmd == "run_hypothesis":
             return {"ok": True, **orch.run_hypothesis(_int(req, "cycle_id"), _int(req, "hypothesis_id"))}
         if cmd == "propose_next":
@@ -164,7 +198,13 @@ def handle(req: dict, *, root, strategies_dir, owner_id="local", org_id="persona
             lid = memory.add_lesson(registry, claim=_str(req, "claim"), verdict=_str(req, "verdict", maxlen=20),
                                     confidence=req.get("confidence"), evidence=req.get("evidence") or [], scope=req.get("scope") or {},
                                     hypothesis_id=_int(req, "hypothesis_id", optional=True), tags=req.get("tags") or "")
-            return {"ok": True, "lesson_id": lid}
+            out = {"ok": True, "lesson_id": lid}
+            if req.get("conclude_hypothesis") is not None:
+                if req.get("hypothesis_id") is None:
+                    raise ValueError("conclude_hypothesis needs hypothesis_id")
+                memory.set_status(_int(req, "hypothesis_id"), _str(req, "conclude_hypothesis", maxlen=20))
+                out["hypothesis_status"] = req["conclude_hypothesis"]
+            return out
         if cmd == "search_lessons":
             return {"ok": True, "lessons": memory.search(req.get("text"), verdict=req.get("verdict"), market=req.get("market"),
                                                          limit=req.get("limit", 20))}
@@ -178,8 +218,8 @@ def handle(req: dict, *, root, strategies_dir, owner_id="local", org_id="persona
             return {"ok": True, "notebook": text}
         if cmd == "conclude_hypothesis":
             status = _str(req, "status", maxlen=20)
-            if status not in ("supported", "refuted", "abandoned"):
-                raise ValueError("status must be supported, refuted or abandoned")
+            if status not in ("supported", "refuted", "inconclusive", "abandoned"):
+                raise ValueError("status must be supported, refuted, inconclusive or abandoned")
             memory.set_status(_int(req, "hypothesis_id"), status)
             return {"ok": True}
         if cmd == "halt":
@@ -208,11 +248,17 @@ def main(argv=None) -> int:
     p.add_argument("--org-id", default="personal")
     args = p.parse_args(argv)
     try:
-        out = handle(json.load(sys.stdin), root=args.root, strategies_dir=args.strategies_dir, owner_id=args.owner_id, org_id=args.org_id)
+        request = json.load(sys.stdin)
+        req_cmd = request.get("command") if isinstance(request, dict) else None
+        out = handle(request, root=args.root, strategies_dir=args.strategies_dir, owner_id=args.owner_id, org_id=args.org_id)
         print(json.dumps(jsonable(out), allow_nan=False))
         return 0
     except (ValueError, TypeError, KeyError, OSError, CycleDenied, json.JSONDecodeError, FileNotFoundError) as exc:
-        print(json.dumps({"ok": False, "error": str(exc), "execution": "DISABLED"}))
+        reply = {"ok": False, "error": str(exc), "execution": "DISABLED"}
+        cmd = locals().get("req_cmd")
+        if cmd in USAGE:
+            reply["usage"] = USAGE[cmd]            # exact shape, so the caller does not have to guess field names
+        print(json.dumps(reply))
         return 1
 
 

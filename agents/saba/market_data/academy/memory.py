@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 VERDICTS = ("candidate", "supported", "refuted", "inconclusive")
-STATUSES = ("open", "testing", "supported", "refuted", "abandoned")
+STATUSES = ("open", "testing", "supported", "refuted", "inconclusive", "abandoned")
 
 
 def _now() -> str:
@@ -111,6 +111,10 @@ class ResearchMemory:
             raise ValueError("invalid status")
         if self.hypothesis(hid) is None:
             raise ValueError("unknown hypothesis")
+        if status == "supported" and not self.db.execute(
+                "SELECT 1 FROM lessons WHERE hypothesis_id=? AND verdict='supported' AND superseded_by IS NULL", (hid,)).fetchone():
+            raise ValueError("a hypothesis is 'supported' only when a 'supported' lesson (positive consumed final test) is linked to it; "
+                             "use 'inconclusive', 'refuted' or 'abandoned' otherwise")
         self.db.execute("UPDATE hypotheses SET status=? WHERE id=?", (status, hid))
         self.db.commit()
         self._event("hypothesis_status", {"id": hid, "status": status})
