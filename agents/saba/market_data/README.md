@@ -40,3 +40,7 @@ Yahoo intraday history is limited; fetches may be delayed, throttled or unavaila
 - `market_data.research.describe(symbol, interval, root)`: simple descriptive summary (not a profitable strategy).
 
 Integration into the **running Trinity container** requires installing the dependencies in that container and mounting persistent data. The existing WSL virtual environment does not automatically become available inside Docker.
+
+## Saba Academy replay engine
+
+Deterministic historical trading simulator with cost model, stop-loss/take-profit, train/validation/final-test protocol and seeded experiments: see [ACADEMY.md](ACADEMY.md).
