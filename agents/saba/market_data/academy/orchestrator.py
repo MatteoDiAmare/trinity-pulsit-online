@@ -163,6 +163,22 @@ class Orchestrator:
         self.memory.set_status(hypothesis_id, "testing")
         return {"hypothesis_id": hypothesis_id, "new_experiments": new, "report": report, "analysis": self.analyze(report)}
 
+    def charge(self, cycle_id: int, n: int = 1):
+        """Charge n experiments to a running cycle (used by studies, which are one pre-registered piece of research)."""
+        h = self.halted()
+        if h:
+            raise CycleDenied(f"halted: {h.get('reason')}")
+        cyc = self._cycle(cycle_id)
+        if cyc["status"] != "running":
+            raise CycleDenied("cycle is not running")
+        started = datetime.fromisoformat(cyc["started_at"])
+        if (self.clock() - started).total_seconds() > self.budget.max_seconds_per_cycle:
+            raise CycleDenied("cycle time budget exhausted")
+        if self.budget.max_experiments_per_cycle - cyc["experiments_run"] < n:
+            raise CycleDenied(f"the cycle has {self.budget.max_experiments_per_cycle - cyc['experiments_run']} experiments left, a study needs {n}")
+        self.memory.db.execute("UPDATE cycles SET experiments_run = experiments_run + ? WHERE id=?", (n, cycle_id))
+        self.memory.db.commit()
+
     @staticmethod
     def analyze(report: dict) -> list[dict]:
         """Rule-based reading of a comparison; a suggestion list for Saba, not a verdict."""
