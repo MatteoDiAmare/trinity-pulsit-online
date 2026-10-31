@@ -359,7 +359,9 @@ class CompareMarketsTests(unittest.TestCase):
 
     def test_validation_and_missing_data(self):
         with self.assertRaises(ValueError):
-            compare_markets(self.reg, self.archive, self.plan, self.specs("GOLD"))
+            compare_markets(self.reg, self.archive, self.plan, [])
+        single = compare_markets(self.reg, self.archive, self.plan[:1], self.specs("GOLD"))
+        self.assertEqual(single["markets"], ["GOLD"])
         dup = self.plan + [dict(self.plan[0])]
         with self.assertRaises(ValueError):
             compare_markets(self.reg, self.archive, dup, self.specs("GOLD", "EURUSD"))

@@ -30,8 +30,8 @@ def compare_markets(registry: ExperimentRegistry, archive: MarketArchive, plan: 
                     instruments: list[InstrumentSpec], *, interval: str = "1d", capital: float = 1000.0,
                     sim_template: SimConfig | None = None, ledger: LedgerStore | None = None) -> dict:
     """plan: [{strategy, params, label}], identical for every instrument."""
-    if len(instruments) < 2:
-        raise ValueError("a comparison needs at least two instruments")
+    if not instruments:
+        raise ValueError("at least one instrument is required")
     labels = [p.get("label") or f"{p['strategy']}#{i}" for i, p in enumerate(plan)]
     if len(set(labels)) != len(labels):
         raise ValueError("plan labels must be unique")
@@ -47,7 +47,8 @@ def compare_markets(registry: ExperimentRegistry, archive: MarketArchive, plan: 
         out = run_training(bars, registry, symbol=spec.symbol, interval=interval, sim_config=cfg, plan=plan,
                            split=Split.chronological(len(bars)), control_runs=0, ledger=ledger)
         cells[spec.id] = {"summary_id": out["summary_experiment_id"], "rejected": out["rejected_strategies"],
-                          "trials_total_on_market": out["trials_total_on_market"], "noise_benchmark_sharpe": out["noise_benchmark_sharpe"]}
+                          "trials_total_on_market": out["trials_total_on_market"], "noise_benchmark_sharpe": out["noise_benchmark_sharpe"],
+                          "new_trials": out["new_trials"], "experiment_ids": [r["experiment_id"] for r in out["_rows"]]}
         cells[spec.id]["rows"] = out["_rows"]
     ids = [i.id for i in instruments if i.id in cells]
     matrix = {}
@@ -77,6 +78,6 @@ def compare_markets(registry: ExperimentRegistry, archive: MarketArchive, plan: 
             "matrix": matrix, "best_strategy_per_market": best_for_market,
             "transfer": {label: f"{m['markets_exceeding_noise']}/{m['markets_evaluated']} markets above the luck benchmark; "
                                 f"{m['markets_positive_validation']}/{m['markets_evaluated']} positive" for label, m in matrix.items()},
-            "market_data": {iid: {k: cells[iid][k] for k in ("summary_id", "trials_total_on_market", "noise_benchmark_sharpe", "rejected")} for iid in ids},
+            "market_data": {iid: {k: cells[iid][k] for k in ("summary_id", "trials_total_on_market", "noise_benchmark_sharpe", "rejected", "new_trials", "experiment_ids")} for iid in ids},
             "warning": "Validation-period comparison only; picking the best cell is selection on validation. "
                        "Every cell counts as a trial on its market. Confirm a chosen candidate once on its own fresh final-test window."}

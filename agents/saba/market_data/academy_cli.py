@@ -26,6 +26,8 @@ def main(argv=None):
     p = argparse.ArgumentParser(description="Saba Academy replay engine (historical simulation only)")
     p.add_argument("--root", help="Archive root directory")
     sub = p.add_subparsers(dest="command", required=True)
+    sub.add_parser("resume", help="Operator only: lift a halt set by Saba or by the operator")
+    sub.add_parser("halt", help="Stop all new research cycles").add_argument("--reason", required=True)
     for name in ("train", "train-specs", "compare", "final-test", "export"):
         s = sub.add_parser(name)
         if name not in ("export", "compare"):
@@ -73,11 +75,20 @@ def main(argv=None):
     archive = MarketArchive(args.root)
     registry = ExperimentRegistry(Path(archive.root) / "experiments.sqlite3")
     try:
-        ledger = LedgerStore(archive.root, args.owner_id, args.org_id)
+        ledger = LedgerStore(archive.root, getattr(args, 'owner_id', 'local'), getattr(args, 'org_id', 'personal'))
         if args.command == "export":
             out = export_all(ledger, args.out or Path(archive.root) / "academy_export",
                              include_abstentions=args.include_abstentions, allow_in_repo=args.allow_in_repo)
             print(json.dumps(out, indent=2))
+            return 0
+        if args.command in ("resume", "halt"):
+            from .academy.orchestrator import Orchestrator
+            o = Orchestrator(archive.root, registry, archive, None)
+            if args.command == "halt":
+                o.halt(args.reason, by="operator")
+            else:
+                o.resume()
+            print(json.dumps({"halted": o.halted()}))
             return 0
         if args.command == "compare":
             plan = []
