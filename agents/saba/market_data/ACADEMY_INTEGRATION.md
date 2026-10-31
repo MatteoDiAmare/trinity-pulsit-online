@@ -42,6 +42,18 @@ Started with `integration/run_one_cycle.sh` (task `/academy-cycle` on the existi
 * **Loophole found in this run and closed:** she screened parameter variants through `test_strategy`, which showed validation results without counting trials (the registered pullback was
   the best of several variants), so the luck benchmark was too low. `test_strategy` now shows the train portion only. Also fixed: the policy blocked `view.open` (price data) for strategies.
 
+## Applying the real turn limit: controlled recreate of Saba only (2026-10-31)
+Root cause of the 50-turn failures: Trinity stores per-agent guardrails in its database (`max_turns_task: 300`) but the agent container reads them only at creation, from the
+`AGENT_GUARDRAILS` env; Saba's container had none, so `/opt/trinity/guardrails-runtime.json` stayed at the baseline 50 turns. A per-task `max_turns` in the task request is not forwarded.
+Trinity's own remedy (GUARD-001): `start` recreates a container whose guardrails drifted. Procedure used, for Saba only:
+1. Pre-flight (read-only): nothing running, no image drift (same image id and Python), volume 757 MB, fingerprints of research data, git workspace, config and credentials (hashes only).
+2. Backup of the workspace without credential files (`~/saba-backups/`, mode 600, 193 MB; restore = untar into the volume).
+3. `POST /api/agents/saba/stop` then `/start` through Trinity (reply: `recreated: true, recreate_reason: config_drift`).
+4. Verification after: research counts and hashes (registry, ledgers, lessons, strategies, parquet, code version, venv, bridge) identical; git head/branch/remote/user identical, including her unpushed local commit;
+   `.claude.json`, `.mcp.json`, `.claude/settings.json` identical; every secret env var (OAuth, GitHub, Trinity auth, MCP key) unchanged (hash prefix compared); only `AGENT_GUARDRAILS` is new;
+   runtime guardrails now `max_turns_task` 300 / `max_turns_chat` 300; a minimal task through Trinity answered (Claude authentication works); bridge answers; 0 schedules; the other agents were not touched.
+5. Note: the runtime `execution_timeout_sec` guardrail is a separate field (chat path, still 1800 s); task runs take their limit from the agent's `execution_timeout_seconds` (3600 s) per the code path. A run longer than 30 minutes has not yet been observed.
+
 ## NOT verified / still open
 1. **The recurring schedule** is intentionally not created or enabled. `integration/register_with_trinity.sh` creates it disabled; `--enable` switches it on.
 2. Whether the `schedules:` block in `template.yaml` is applied to an already running agent by Trinity (assumed not; the script creates it through the API).

@@ -62,15 +62,22 @@ def main():
     ap.add_argument("--container", default="agent-saba")
     ap.add_argument("--log", required=True)
     ap.add_argument("--min-task-minutes", type=float, default=10)
+    ap.add_argument("--max-cost-usd", type=float, default=0, help="stop launching tasks once the (API-equivalent) cost reaches this; 0 = no cap. "
+                    "Tasks that Trinity records no cost for (failed ones) are estimated at --est-usd-per-min")
+    ap.add_argument("--est-usd-per-min", type=float, default=0.125)
     a = ap.parse_args()
     start = now()
     end = start + dt.timedelta(minutes=a.minutes)
     fh = open(a.log, "a")
     log(fh, event="session_start", end=end.isoformat(timespec="seconds"), minutes=a.minutes, max_turns=a.max_turns)
     n = 0
+    spent = 0.0
     stop_reason = "time"
     while True:
         remaining = (end - now()).total_seconds()
+        if a.max_cost_usd and spent >= a.max_cost_usd:
+            stop_reason = f"COST CAP: ${spent:.2f} >= ${a.max_cost_usd:.2f}"
+            break
         if remaining < a.min_task_minutes * 60:
             stop_reason = f"only {remaining / 60:.1f} min left (< {a.min_task_minutes:g})"
             break
@@ -112,7 +119,9 @@ def main():
                     log(fh, event="terminate_requested_at_deadline", n=n)
                 except Exception as exc:
                     log(fh, event="terminate_failed", error=str(exc)[:200])
-        log(fh, event="task_finished", n=n, execution_id=eid, status=status, minutes=round((now() - t0).total_seconds() / 60, 1),
+        minutes = (now() - t0).total_seconds() / 60
+        spent += ex.get("cost") if ex.get("cost") is not None else minutes * a.est_usd_per_min
+        log(fh, event="task_finished", n=n, spent_usd_so_far=round(spent, 2), execution_id=eid, status=status, minutes=round((now() - t0).total_seconds() / 60, 1),
             error=(ex.get("error") or "")[:300], cost=ex.get("cost"), terminated_at_deadline=terminated,
             response_tail=(ex.get("response") or "")[-1500:])
     log(fh, event="session_end", tasks=n, reason=stop_reason, elapsed_minutes=round((now() - start).total_seconds() / 60, 1))
