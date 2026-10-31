@@ -122,6 +122,9 @@ def run_session(a, deps):
     n, spent, stop_reason, quick_fails = 0, 0.0, "time", 0
     while True:
         remaining = (end - deps["now"]()).total_seconds()
+        if a.max_tasks and n >= a.max_tasks:
+            stop_reason = f"max_tasks={a.max_tasks} reached"
+            break
         if not can_launch(spent, a.max_cost_usd):
             stop_reason = f"COST CAP: spent ${spent:.2f}, cap ${a.max_cost_usd:.2f} (next task needs a ${LAUNCH_RESERVE_USD:.2f} reserve)"
             break
@@ -142,7 +145,7 @@ def run_session(a, deps):
             break
         n += 1
         task_end = min(end, deps["now"]() + dt.timedelta(minutes=55))
-        msg = "/academy-cycle\n\n" + BRIEF.format(n=n, end=end.strftime("%H:%M"), left=int(remaining / 60), task_end=task_end.strftime("%H:%M"))
+        msg = "/academy-cycle\n\n" + (deps.get("brief") or BRIEF).format(n=n, end=end.strftime("%H:%M"), left=int(remaining / 60), task_end=task_end.strftime("%H:%M"))
         resp = deps["api"]("POST", f"/api/agents/{a.agent}/task", {"message": msg, "async_mode": True, "max_turns": a.max_turns})
         eid = resp.get("execution_id") or resp.get("id")
         t0 = deps["now"]()
@@ -212,10 +215,13 @@ def main():
     ap.add_argument("--log", required=True)
     ap.add_argument("--min-task-minutes", type=float, default=10)
     ap.add_argument("--max-cost-usd", type=float, default=0, help="total API-equivalent cost cap for the whole session; 0 = no cap")
+    ap.add_argument("--max-tasks", type=int, default=0, help="stop after this many tasks (0 = no limit)")
+    ap.add_argument("--brief-file", help="text with {n} {end} {left} {task_end} placeholders replacing the default brief")
     ap.add_argument("--est-usd-per-min", type=float, default=0.125, help="fallback estimate if cost can neither be recorded nor measured")
     a = ap.parse_args()
     deps = {"now": now, "sleep": time.sleep, "api": api, "bridge_status": bridge_status, "running_cost": running_cost, "print": lambda s: print(s, flush=True),
-            "logfile": open(a.log, "a")}
+            "logfile": open(a.log, "a"),
+            "brief": Path(a.brief_file).read_text() if a.brief_file else None}
     run_session(a, deps)
 
 

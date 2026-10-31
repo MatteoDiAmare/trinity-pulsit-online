@@ -38,6 +38,7 @@ class World:
         self.calls.append((method, path))
         if method == "POST" and path.endswith("/task"):
             assert body["max_turns"] == 300 and body["async_mode"] is True
+            self.messages = getattr(self, "messages", []) + [body["message"]]
             eid = f"e{len(self.execs) + 1}"
             self.execs[eid] = {"start": self.t}
             self.current = eid
@@ -70,9 +71,9 @@ class World:
 
     def run(self, minutes=87.5, cap=15.0, est=0.125):
         a = types.SimpleNamespace(minutes=minutes, max_turns=300, agent="saba", container="agent-saba", min_task_minutes=10, max_cost_usd=cap,
-                                  est_usd_per_min=est)
+                                  est_usd_per_min=est, max_tasks=getattr(self, "max_tasks", 0))
         deps = {"now": self.now, "sleep": self.sleep, "api": self.api, "bridge_status": self.status, "running_cost": self.running_cost,
-                "print": lambda s: None, "logfile": self.log}
+                "print": lambda s: None, "logfile": self.log, "brief": getattr(self, "brief", None)}
         out = rs.run_session(a, deps)
         out["events"] = [json.loads(l) for l in self.log.getvalue().splitlines()]
         return out
@@ -156,6 +157,17 @@ class GuardTests(unittest.TestCase):
         out = w.run(minutes=25, cap=0)
         self.assertEqual(out["tasks"], 2)                       # 10 + 10 min, 5 min left < 10
         self.assertIn("min left", out["reason"])
+
+    def test_max_tasks_and_custom_brief(self):
+        w = World(task_minutes=10, rate=0.05)
+        w.max_tasks, w.brief = 1, "CUSTOM {n} {end} {left} {task_end}"
+        out = w.run(minutes=87.5)
+        self.assertEqual(out["tasks"], 1)
+        self.assertIn("max_tasks=1", out["reason"])
+        self.assertTrue(w.messages[0].startswith("/academy-cycle\n\nCUSTOM 1 "))
+        w2 = World(task_minutes=10, rate=0.05)
+        w2.run(minutes=25)
+        self.assertIn("Session brief from the operator", w2.messages[0])          # the default brief is unchanged
 
     def test_subscription_limit_stops_the_session_instead_of_looping(self):
         w = World(task_minutes=10, rate=0.1)

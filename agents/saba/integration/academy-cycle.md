@@ -8,8 +8,8 @@ are enforced by the bridge, not by this text.
 
 Send `{"command": "help"}` once to get the exact JSON of every command (errors also include the expected usage). `start_cycle` returns a
 briefing (status, notebook, ranking). `register_hypothesis` with `run_in_cycle` registers and runs in one call; `add_lesson` with
-`conclude_hypothesis` closes the hypothesis in the same call. The task has a limited number of turns (about 50): plan the cycle, keep it
-small and always end with `finish_cycle`.
+`conclude_hypothesis` closes the hypothesis in the same call. A task may use up to 300 turns and 60 minutes (verified runtime limits), and experiments are accepted only within
+30 minutes after `start_cycle` (see `status` for the budget): plan the cycle, keep it focused and always end with `finish_cycle`.
 
 Call the bridge ONLY like this (one JSON object per call, answer is one JSON object):
 
