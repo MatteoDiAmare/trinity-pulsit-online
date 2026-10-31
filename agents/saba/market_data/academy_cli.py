@@ -26,6 +26,11 @@ def main(argv=None):
     p = argparse.ArgumentParser(description="Saba Academy replay engine (historical simulation only)")
     p.add_argument("--root", help="Archive root directory")
     sub = p.add_subparsers(dest="command", required=True)
+    rp = sub.add_parser("report", help="Session report from stored evidence (registry, ledgers, memory) against a baseline file")
+    rp.add_argument("--baseline", required=True, help="JSON with max_registry_id, max_lesson_id, max_hyp_id, max_cycle_id taken before the session")
+    rp.add_argument("--random-runs", type=int, default=100)
+    rp.add_argument("--out", help="Write markdown here (JSON goes to <out>.json)")
+    rp.add_argument("--transcript", help="Text file with the agent's narration (one line per statement) to quote earlier-lesson references")
     sub.add_parser("resume", help="Operator only: lift a halt set by Saba or by the operator")
     sub.add_parser("halt", help="Stop all new research cycles").add_argument("--reason", required=True)
     for name in ("train", "train-specs", "compare", "final-test", "export"):
@@ -80,6 +85,16 @@ def main(argv=None):
             out = export_all(ledger, args.out or Path(archive.root) / "academy_export",
                              include_abstentions=args.include_abstentions, allow_in_repo=args.allow_in_repo)
             print(json.dumps(out, indent=2))
+            return 0
+        if args.command == "report":
+            from .academy.report import build_report, render_markdown
+            rep = build_report(archive.root, json.loads(Path(args.baseline).read_text()), random_runs=args.random_runs,
+                               transcript_text=Path(args.transcript).read_text() if args.transcript else None)
+            md = render_markdown(rep)
+            if args.out:
+                Path(args.out).write_text(md, encoding="utf-8")
+                Path(args.out + ".json").write_text(json.dumps(rep, indent=1, default=str), encoding="utf-8")
+            print(md)
             return 0
         if args.command in ("resume", "halt"):
             from .academy.orchestrator import Orchestrator
