@@ -10,12 +10,14 @@ Protocol
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import numpy as np
 import pandas as pd
 
 from ..laboratory import ExperimentRegistry
 from .evaluation import compute_metrics
 from .execution import CostModel
+from .ledger import LedgerStore, result_payload
 from .simulator import SimConfig, Simulator
 from .strategies import STRATEGIES, build_strategy
 
@@ -94,19 +96,25 @@ def _config_dict(symbol, interval, spec, sim_config, split, seed, bars):
 
 def run_training(bars: pd.DataFrame, registry: ExperimentRegistry, *, symbol: str, interval: str,
                  experiments: int = 100, seed: int = 0, sim_config: SimConfig | None = None,
-                 split: Split | None = None, control_runs: int = 30) -> dict:
+                 split: Split | None = None, control_runs: int = 30, ledger: LedgerStore | None = None) -> dict:
     sim_config = sim_config or SimConfig()
     split = split or Split.chronological(len(bars))
     dev = bars.iloc[:split.val_end]          # final test slice never leaves this function
     rows = []
     for k, spec in enumerate(plan_experiments(experiments, seed)):
-        train_m = evaluate_segment(dev, spec, sim_config, 0, split.train_end, interval)
-        val_m = evaluate_segment(dev, spec, sim_config, split.train_end, split.val_end, interval)
+        train_m, train_r = evaluate_segment(dev, spec, sim_config, 0, split.train_end, interval, keep_result=True)
+        val_m, val_r = evaluate_segment(dev, spec, sim_config, split.train_end, split.val_end, interval, keep_result=True)
         score = selection_score(val_m)
         config = _config_dict(symbol, interval, spec, sim_config, split, seed, bars)
         results = {"train": train_m, "validation": val_m,
                    "validation_score": score if np.isfinite(score) else None, "experiment_index": k}
         exp_id = registry.record(f"academy:{spec['strategy']}", dev, config, results)
+        if ledger is not None:
+            ledger.write_meta(exp_id, {"kind": "training_experiment", "symbol": symbol, "interval": interval,
+                                       "strategy": spec["strategy"], "params": spec["params"],
+                                       "configuration": config, "results": results})
+            ledger.write_period(exp_id, "train", result_payload(train_r, train_m))
+            ledger.write_period(exp_id, "validation", result_payload(val_r, val_m))
         rows.append({"experiment_id": exp_id, "strategy": spec["strategy"], "params": spec["params"],
                      "score": score, "train": train_m, "validation": val_m})
     controls = []
@@ -135,6 +143,8 @@ def run_training(bars: pd.DataFrame, registry: ExperimentRegistry, *, symbol: st
                                  {"symbol": symbol, "interval": interval, "seed": seed, "experiments": experiments},
                                  _jsonable(summary))
     summary["summary_experiment_id"] = summary_id
+    if ledger is not None:
+        ledger.write_summary(summary_id, _jsonable(summary))
     return summary
 
 
@@ -149,14 +159,18 @@ def _jsonable(obj):
 
 
 def run_final_test(bars: pd.DataFrame, registry: ExperimentRegistry, experiment_id: int, *,
-                   force: bool = False, keep_result: bool = False) -> dict:
-    records = {r["id"]: r for r in registry.recent(1000)}
-    rec = records.get(experiment_id)
-    if rec is None or not rec["name"].startswith("academy:") or "params" not in rec["configuration"]:
+                   force: bool = False, keep_result: bool = False, ledger: LedgerStore | None = None) -> dict:
+    row = registry.db.execute("SELECT name,configuration_json,results_json FROM experiments WHERE id=?",
+                              (experiment_id,)).fetchone()
+    if row is None or not row[0].startswith("academy:") or "params" not in json.loads(row[1]):
         raise ValueError("experiment_id is not an Academy training experiment")
+    rec = {"name": row[0], "configuration": json.loads(row[1]), "results": json.loads(row[2])}
     cfg = rec["configuration"]
-    if not force and any(r["name"] == "academy:final_test" and r["configuration"].get("experiment_id") == experiment_id
-                         for r in records.values()):
+    if ledger is not None and experiment_id not in ledger.experiments():
+        raise ValueError("experiment has no ledger for this owner/org (check --owner-id/--org-id)")
+    consumed = any(json.loads(c).get("experiment_id") == experiment_id for (c,) in registry.db.execute(
+        "SELECT configuration_json FROM experiments WHERE name='academy:final_test'"))
+    if not force and consumed:
         raise ValueError("final test already consumed for this experiment (use --force to repeat; "
                          "a repeated test is no longer unbiased)")
     split = Split(cfg["split"]["train_end_index"], cfg["split"]["val_end_index"])
@@ -164,11 +178,13 @@ def run_final_test(bars: pd.DataFrame, registry: ExperimentRegistry, experiment_
         raise ValueError("archive no longer matches the recorded split (history changed)")
     sim_config = SimConfig(cfg["capital"], CostModel(**cfg["costs"]), cfg["max_exposure"], allow_short=cfg["allow_short"])
     spec = {"strategy": cfg["strategy"], "params": cfg["params"]}
-    out = evaluate_segment(bars, spec, sim_config, split.val_end, len(bars), cfg["interval"], keep_result=keep_result)
-    metrics, result = out if keep_result else (out, None)
+    metrics, sim = evaluate_segment(bars, spec, sim_config, split.val_end, len(bars), cfg["interval"], keep_result=True)
+    result = sim if keep_result else None
     payload = {"final_test": metrics, "validation": rec["results"]["validation"]}
     test_cfg = {"experiment_id": experiment_id, "test_start_utc": bars.index[split.val_end].isoformat(),
                 "test_end_utc": bars.index[-1].isoformat(), "strategy": cfg["strategy"], "params": cfg["params"]}
     payload["final_test_experiment_id"] = registry.record("academy:final_test", bars.iloc[split.val_end:], test_cfg,
                                                           _jsonable({"final_test": metrics}))
+    if ledger is not None:
+        ledger.write_period(experiment_id, "final_test", result_payload(sim, metrics))
     return (payload, result) if keep_result else payload

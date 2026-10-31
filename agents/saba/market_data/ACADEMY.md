@@ -30,6 +30,9 @@ random-control runs. `final-test` runs one chosen experiment on the untouched te
 (`academy:final_test`); a repeat needs `--force` and is then no longer an unbiased test.
 `--ledger-dir` writes `trades.csv`, `decisions.csv`, `orders.csv`, `equity.csv`.
 
+`train`/`final-test` also persist full run logs; `export` writes versioned private-by-design JSON for a Supabase-Auth-protected
+bucket: see [ACADEMY_EXPORT.md](ACADEMY_EXPORT.md).
+
 ## Protocol
 
 * Chronological split 60 % train / 20 % validation / 20 % final test (by bar count).
