@@ -18,15 +18,17 @@ from .academy.instruments import available_instruments, load_instrument
 from .academy.risk import RiskProfile, StressModel
 from .academy.ledger import LedgerStore
 from .academy.export import export_all
+from .academy.compare import compare_markets
+from .academy.spec_strategy import load_specs_dir
 
 
 def main(argv=None):
     p = argparse.ArgumentParser(description="Saba Academy replay engine (historical simulation only)")
     p.add_argument("--root", help="Archive root directory")
     sub = p.add_subparsers(dest="command", required=True)
-    for name in ("train", "final-test", "export"):
+    for name in ("train", "train-specs", "compare", "final-test", "export"):
         s = sub.add_parser(name)
-        if name != "export":
+        if name not in ("export", "compare"):
             s.add_argument("--symbol", default="GC=F")
             s.add_argument("--interval", default="1d")
         s.add_argument("--owner-id", default="local", help="Supabase user UUID for exports (default: local)")
@@ -35,6 +37,17 @@ def main(argv=None):
     e.add_argument("--out", help="Output directory (default: <root>/academy_export; must be outside any git repo)")
     e.add_argument("--include-abstentions", action="store_true")
     e.add_argument("--allow-in-repo", action="store_true")
+    ts = sub.choices["train-specs"]
+    ts.add_argument("--specs-dir", required=True, help="Directory of JSON strategy specs (versioned in git)")
+    ts.add_argument("--instrument", required=True)
+    ts.add_argument("--capital", type=float, default=1000.0)
+    ts.add_argument("--seed", type=int, default=42)
+    cm = sub.choices["compare"]
+    cm.add_argument("--instruments", required=True, help="Comma-separated instrument ids, e.g. GOLD,EURUSD,SP500")
+    cm.add_argument("--interval", default="1d")
+    cm.add_argument("--specs-dir", help="JSON strategy specs to run on every instrument")
+    cm.add_argument("--experiment-id", type=int, action="append", default=[], help="Transfer an existing experiment's strategy (repeatable)")
+    cm.add_argument("--capital", type=float, default=1000.0)
     t = sub.choices["train"]
     t.add_argument("--capital", type=float, default=1000.0)
     t.add_argument("--experiments", type=int, default=100)
@@ -66,11 +79,32 @@ def main(argv=None):
                              include_abstentions=args.include_abstentions, allow_in_repo=args.allow_in_repo)
             print(json.dumps(out, indent=2))
             return 0
-        spec = load_instrument(args.instrument) if args.command == "train" and args.instrument else None
+        if args.command == "compare":
+            plan = []
+            if args.specs_dir:
+                plan += [{"strategy": "spec", "params": {"spec": sp}, "label": n} for n, sp in load_specs_dir(args.specs_dir).items()]
+            for eid in args.experiment_id:
+                row = registry.db.execute("SELECT configuration_json FROM experiments WHERE id=?", (eid,)).fetchone()
+                if row is None or "params" not in json.loads(row[0]):
+                    raise ValueError(f"experiment {eid} is not an Academy training experiment")
+                c = json.loads(row[0])
+                plan.append({"strategy": c["strategy"], "params": c["params"], "label": f"exp{eid}:{c['strategy']}"})
+            if not plan:
+                raise ValueError("give --specs-dir and/or --experiment-id")
+            out = compare_markets(registry, archive, plan, [load_instrument(i) for i in args.instruments.split(",")],
+                                  interval=args.interval, capital=args.capital, ledger=ledger)
+            print(json.dumps(out, indent=2, default=str))
+            return 0
+        spec = load_instrument(args.instrument) if args.command in ("train", "train-specs") and args.instrument else None
         if spec is not None:
             args.symbol = spec.symbol
         bars = archive.read(args.symbol, args.interval)
-        if args.command == "train":
+        if args.command == "train-specs":
+            plan = [{"strategy": "spec", "params": {"spec": sp}, "label": n} for n, sp in load_specs_dir(args.specs_dir).items()]
+            cfg = SimConfig(args.capital, None, None, instrument=spec)
+            out = run_training(bars, registry, symbol=args.symbol, interval=args.interval, seed=args.seed, sim_config=cfg,
+                               plan=plan, control_runs=30, ledger=ledger)
+        elif args.command == "train":
             explicit_costs = any(a.startswith(("--fee-bps", "--spread-bps", "--slippage-bps")) for a in (argv or []))
             costs = CostModel(args.fee_bps, args.spread_bps, args.slippage_bps) if (spec is None or explicit_costs) else None
             cfg = SimConfig(args.capital, costs, args.max_exposure if args.max_exposure is not None else (None if spec else 1.0),
@@ -90,7 +124,7 @@ def main(argv=None):
                 pd.DataFrame(result.decisions).to_csv(d / "decisions.csv", index=False)
                 pd.DataFrame(result.orders).to_csv(d / "orders.csv", index=False)
                 result.equity.to_csv(d / "equity.csv")
-        print(json.dumps(out, indent=2, default=str))
+        print(json.dumps({k: v for k, v in out.items() if not k.startswith('_')}, indent=2, default=str))
         return 0
     except (ValueError, FileNotFoundError) as exc:
         print(json.dumps({"error": str(exc)}))

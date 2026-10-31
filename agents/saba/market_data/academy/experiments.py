@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 
 from ..laboratory import ExperimentRegistry
+from .causality import assert_causal
 from .evaluation import compute_metrics
 from .execution import CostModel
 from .integrity import (FINAL_TESTS_PER_WINDOW, MIN_FRESH_TEST_BARS, SpecIndex, code_version, dataset_sha256,
@@ -22,8 +23,10 @@ from .integrity import (FINAL_TESTS_PER_WINDOW, MIN_FRESH_TEST_BARS, SpecIndex, 
 from .ledger import LedgerStore, result_payload
 from .simulator import SimConfig, Simulator
 from .strategies import STRATEGIES, build_strategy
+from . import spec_strategy as _spec_strategy  # noqa: F401  (registers the 'spec' strategy)
 
 SPLIT_VERSION = 1
+BUILTIN = ('breakout', 'mean_reversion', 'random_control', 'sma_cross')   # sampled by random search
 
 
 @dataclass(frozen=True)
@@ -77,7 +80,7 @@ def sample_params(name: str, rng: np.random.Generator, seed: int) -> dict:
 
 
 def plan_experiments(n: int, seed: int) -> list[dict]:
-    names = sorted(STRATEGIES)
+    names = sorted(BUILTIN)
     rng = np.random.default_rng(seed)
     return [{"strategy": names[k % len(names)],
              "params": sample_params(names[k % len(names)], rng, seed * 1_000_003 + k)} for k in range(n)]
@@ -115,7 +118,10 @@ def _config_dict(symbol, interval, spec, sim_config, split, seed, bars):
 
 def run_training(bars: pd.DataFrame, registry: ExperimentRegistry, *, symbol: str, interval: str,
                  experiments: int = 100, seed: int = 0, sim_config: SimConfig | None = None,
-                 split: Split | None = None, control_runs: int = 30, ledger: LedgerStore | None = None) -> dict:
+                 split: Split | None = None, control_runs: int = 30, ledger: LedgerStore | None = None,
+                 plan: list[dict] | None = None) -> dict:
+    """`plan`: explicit experiments [{strategy, params, label?}] (e.g. JSON specs) instead of random search.
+    Strategies outside BUILTIN must pass the causality gate before anything is recorded."""
     sim_config = sim_config or SimConfig()
     if split is None:
         frontier = test_frontier(registry, symbol, interval)
@@ -124,14 +130,26 @@ def run_training(bars: pd.DataFrame, registry: ExperimentRegistry, *, symbol: st
     index, market, version = SpecIndex(registry), market_key(symbol, interval), code_version()
     dev_sha = dataset_sha256(dev)
     split_key = {"train_end": split.train_end, "val_end": split.val_end, "version": SPLIT_VERSION}
-    rows, reused, new_trials = [], 0, 0
-    for k, spec in enumerate(plan_experiments(experiments, seed)):
+    rows, reused, new_trials, rejected, gate_cache = [], 0, 0, [], {}
+    planned = plan if plan is not None else plan_experiments(experiments, seed)
+    experiments = len(planned)
+    for k, spec in enumerate(planned):
+        if spec["strategy"] not in BUILTIN:
+            gk = json.dumps([spec["strategy"], spec["params"]], sort_keys=True)
+            if gk not in gate_cache:
+                try:
+                    gate_cache[gk] = assert_causal(spec["strategy"], spec["params"], dev, sim_config)
+                except ValueError as exc:
+                    gate_cache[gk] = str(exc)
+            if isinstance(gate_cache[gk], str):
+                rejected.append({"strategy": spec["strategy"], "label": spec.get("label"), "reason": gate_cache[gk]})
+                continue
         h = spec_hash(spec["strategy"], spec["params"], sim_config.to_dict(), dev_sha, split_key, version)
         known = index.lookup(h)
         if known is not None:     # identical experiment already done: reuse, never re-count
             old = json.loads(registry.db.execute("SELECT results_json FROM experiments WHERE id=?", (known,)).fetchone()[0])
             reused += 1
-            rows.append({"experiment_id": known, "strategy": spec["strategy"], "params": spec["params"],
+            rows.append({"experiment_id": known, "strategy": spec["strategy"], "params": spec["params"], "label": spec.get("label"),
                          "score": selection_score(old["validation"]), "train": old["train"],
                          "validation": old["validation"], "reused": True})
             continue
@@ -140,7 +158,8 @@ def run_training(bars: pd.DataFrame, registry: ExperimentRegistry, *, symbol: st
         score = selection_score(val_m)
         new_trials += 1
         config = _config_dict(symbol, interval, spec, sim_config, split, seed, bars)
-        config.update({"spec_sha256": h, "code_version": version, "dev_dataset_sha256": dev_sha})
+        config.update({"spec_sha256": h, "code_version": version, "dev_dataset_sha256": dev_sha,
+                       "label": spec.get("label"), "causality_checked": spec["strategy"] not in BUILTIN})
         results = {"train": train_m, "validation": val_m, "trial_number_on_market": index.trials(market) + 1,
                    "validation_score": score if np.isfinite(score) else None, "experiment_index": k}
         exp_id = registry.record(f"academy:{spec['strategy']}", dev, config, results)
@@ -151,7 +170,7 @@ def run_training(bars: pd.DataFrame, registry: ExperimentRegistry, *, symbol: st
                                        "configuration": config, "results": results})
             ledger.write_period(exp_id, "train", result_payload(train_r, train_m))
             ledger.write_period(exp_id, "validation", result_payload(val_r, val_m))
-        rows.append({"experiment_id": exp_id, "strategy": spec["strategy"], "params": spec["params"],
+        rows.append({"experiment_id": exp_id, "strategy": spec["strategy"], "params": spec["params"], "label": spec.get("label"),
                      "score": score, "train": train_m, "validation": val_m})
     controls = []
     for j in range(control_runs):
@@ -166,7 +185,7 @@ def run_training(bars: pd.DataFrame, registry: ExperimentRegistry, *, symbol: st
         "symbol": symbol, "interval": interval, "seed": seed, "experiments": experiments,
         "split": _config_dict(symbol, interval, plan_experiments(1, 0)[0], sim_config, split, seed, bars)["split"],
         "selected_experiment_id": best["experiment_id"] if best else None,
-        "new_trials": new_trials, "reused_experiments": reused, "trials_total_on_market": total_trials,
+        "new_trials": new_trials, "reused_experiments": reused, "rejected_strategies": rejected, "trials_total_on_market": total_trials,
         "noise_benchmark_sharpe": noise,
         "selected_exceeds_noise_benchmark": None if best is None else bool((best["validation"]["sharpe_annualized"] or 0) > noise),
         "code_version": version, "dev_dataset_sha256": dev_sha,
@@ -188,6 +207,7 @@ def run_training(bars: pd.DataFrame, registry: ExperimentRegistry, *, symbol: st
     summary["summary_experiment_id"] = summary_id
     if ledger is not None:
         ledger.write_summary(summary_id, _jsonable(summary))
+    summary["_rows"] = rows          # in-process detail for callers (not persisted, not printed)
     return summary
 
 

@@ -94,8 +94,14 @@ def export_all(store: LedgerStore, out_dir: str | Path, *, include_abstentions: 
         experiments.append({"experiment_id": eid, "strategy": meta["strategy"], "interval": meta["interval"],
                             "symbol": meta["symbol"], "periods": periods,
                             "validation_net_return_pct": meta["results"]["validation"]["net_return_pct"]})
-    put("strategies.json", _envelope("strategies", store, None, None, [
-        {"name": n, "description": (c.__doc__ or "").strip().split("\n")[0], "default_params": c().params()} for n, c in sorted(STRATEGIES.items())]))
+    catalogue = []
+    for n, c in sorted(STRATEGIES.items()):
+        try:
+            defaults = c().params()
+        except TypeError:           # strategies defined purely by data (e.g. JSON specs) have no default parameters
+            defaults = None
+        catalogue.append({"name": n, "description": (c.__doc__ or "").strip().split("\n")[0], "default_params": defaults})
+    put("strategies.json", _envelope("strategies", store, None, None, catalogue))
     put("training_runs.json", _envelope("training_runs", store, None, None, store.summaries()))
     listing = {rel: {"sha256": hashlib.sha256(b).hexdigest(), "bytes": len(b)} for rel, b in sorted(files.items())}
     content_sha = hashlib.sha256(json.dumps(listing, sort_keys=True).encode()).hexdigest()

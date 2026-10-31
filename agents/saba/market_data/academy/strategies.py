@@ -46,15 +46,29 @@ class PositionInfo:
     bars_held: int
 
 
+MAX_LOOKBACK = 3000   # bars exposed to a strategy; longer histories are truncated to the most recent bars
+
+
 class MarketView:
-    """Read-only window of completed bars ending at the current bar."""
-    __slots__ = ("open", "high", "low", "close", "volume", "timestamp", "n")
+    """Read-only window of completed bars ending at the current bar.
+
+    The arrays are independent COPIES (owndata, read-only): a view onto the full series would leak
+    future bars through `array.base`. `n` is the number of bars in the window (<= MAX_LOOKBACK),
+    `total` the number of bars seen so far. Adversarial in-process code can still reach other objects via
+    gc/frames; arbitrary custom-code strategies therefore need the isolated runner, not this class alone.
+    """
+    __slots__ = ("open", "high", "low", "close", "volume", "timestamp", "n", "total")
 
     def __init__(self, arrays: dict, index, n: int):
-        self.open, self.high, self.low = arrays["open"][:n], arrays["high"][:n], arrays["low"][:n]
-        self.close, self.volume = arrays["close"][:n], arrays["volume"][:n]
+        lo = max(0, n - MAX_LOOKBACK)
+        if "_stack" in arrays:       # (5, N) matrix prepared once by the simulator: one copy per bar
+            block = np.array(arrays["_stack"][:, lo:n], copy=True)
+        else:
+            block = np.array([arrays[k][lo:n] for k in ("open", "high", "low", "close", "volume")], dtype=float)
+        block.setflags(write=False)
+        self.open, self.high, self.low, self.close, self.volume = block   # rows: base is this window-only copy
         self.timestamp = index[n - 1]
-        self.n = n
+        self.n, self.total = n - lo, n
 
     def __len__(self):
         return self.n

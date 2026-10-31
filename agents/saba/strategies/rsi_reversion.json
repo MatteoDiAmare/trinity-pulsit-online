@@ -1,0 +1,14 @@
+{
+  "name": "rsi_reversion", "version": 1,
+  "hypothesis": "Short-horizon RSI extremes inside a quiet regime (low ATR relative to price) revert.",
+  "indicators": {
+    "rsi": {"type": "rsi", "source": "close", "window": 14},
+    "atr": {"type": "atr", "window": 14}
+  },
+  "entry_long": {"all": [{"lt": ["rsi", 25]}, {"lt": [{"div": ["atr", "close"]}, 0.02]}]},
+  "entry_short": {"all": [{"gt": ["rsi", 75]}, {"lt": [{"div": ["atr", "close"]}, 0.02]}]},
+  "exit_long": {"gt": ["rsi", 50]},
+  "exit_short": {"lt": ["rsi", 50]},
+  "risk": {"stop_loss_pct": 2.0, "take_profit_pct": 3.0},
+  "allow_short": true
+}

@@ -93,9 +93,10 @@ class Simulator:
         bars = bars.iloc[:end]
         arrays = {k: bars[c].to_numpy(dtype=float, copy=True) for k, c in
                   (("open", "Open"), ("high", "High"), ("low", "Low"), ("close", "Close"), ("volume", "Volume"))}
+        arrays["_stack"] = np.vstack([arrays[k] for k in ("open", "high", "low", "close", "volume")])
         for a in arrays.values():
             a.setflags(write=False)
-        index = bars.index
+        index = list(bars.index)       # box timestamps once, not twice per bar
         cfg = self.cfg
         self._costs = cfg.effective_costs
         self._lev = cfg.leverage_cap()

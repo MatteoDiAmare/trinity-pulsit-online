@@ -1,0 +1,15 @@
+{
+  "name": "ema_trend", "version": 1,
+  "hypothesis": "A fast EMA crossing a slow EMA with positive momentum marks a persistent trend; ATR-based stops cap the loss.",
+  "indicators": {
+    "fast": {"type": "ema", "source": "close", "window": 12},
+    "slow": {"type": "ema", "source": "close", "window": 48},
+    "atr": {"type": "atr", "window": 14}
+  },
+  "entry_long": {"cross_above": ["fast", "slow"]},
+  "entry_short": {"cross_below": ["fast", "slow"]},
+  "exit_long": {"lt": ["fast", "slow"]},
+  "exit_short": {"gt": ["fast", "slow"]},
+  "risk": {"stop_loss_pct": 3.0, "stop_atr_mult": 2.0, "atr_indicator": "atr", "stop_floor_pct": 0.2},
+  "allow_short": true
+}

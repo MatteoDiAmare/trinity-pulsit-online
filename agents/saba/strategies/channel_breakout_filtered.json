@@ -1,0 +1,77 @@
+{
+  "name": "channel_breakout_filtered",
+  "version": 1,
+  "hypothesis": "Breakouts of the prior 30-bar channel that coincide with above-average range persist; weekends are skipped.",
+  "indicators": {
+    "upper": {
+      "type": "highest",
+      "source": "high",
+      "window": 30,
+      "exclude_current": true
+    },
+    "lower": {
+      "type": "lowest",
+      "source": "low",
+      "window": 30,
+      "exclude_current": true
+    },
+    "avg_range": {
+      "type": "sma",
+      "source": "range",
+      "window": 30
+    },
+    "cur_range": {
+      "type": "sma",
+      "source": "range",
+      "window": 2
+    }
+  },
+  "entry_long": {
+    "all": [
+      {
+        "gt": [
+          "close",
+          "upper"
+        ]
+      },
+      {
+        "gt": [
+          "cur_range",
+          "avg_range"
+        ]
+      },
+      {
+        "lt": [
+          "weekday",
+          5
+        ]
+      }
+    ]
+  },
+  "risk": {
+    "stop_loss_pct": 2.5
+  },
+  "entry_short": {
+    "all": [
+      {
+        "lt": [
+          "close",
+          "lower"
+        ]
+      },
+      {
+        "gt": [
+          "cur_range",
+          "avg_range"
+        ]
+      },
+      {
+        "lt": [
+          "weekday",
+          5
+        ]
+      }
+    ]
+  },
+  "allow_short": true
+}

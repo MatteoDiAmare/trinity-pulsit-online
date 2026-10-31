@@ -68,6 +68,39 @@ Limits of this protection: it is a simulation. It cannot prove that a real broke
 negative balances; exchange price limits or halts can stop trading altogether; financing/swap, FX conversion of the account currency and
 contract-roll adjustment are not modelled.
 
+## Saba's own strategies: JSON specs, causality gate, market comparison
+
+**Strategies as data.** Saba composes strategies as JSON (`agents/saba/strategies/*.json`, versioned in git; three examples). A spec
+(`academy/spec_strategy.py`) declares indicators (sma, ema, stdev, zscore, roc, rsi, atr, highest, lowest), entry/exit conditions
+(comparisons, cross_above/below, all/any/not, arithmetic, `prev` lags up to 50 bars, hour/weekday), optional `size`, and a **mandatory**
+`risk.stop_loss_pct` (optionally an ATR-based stop that is never wider than that cap). The grammar is closed and validated (bounded
+windows, depth, node count; unknown keys/operators/operands rejected); no code is executed (a test scans the module for
+`eval/exec/__import__/...`). Indicators are computed only from bars up to the current one. Limits: indicators read raw series
+(open/high/low/close/volume/hl2/hlc3/range/ret), not other indicators; EMA/RSI/ATR use a truncated 5x-window recursion.
+
+```bash
+python -m market_data.academy_cli train-specs --specs-dir strategies --instrument EURUSD --interval 1d
+```
+
+**Causality gate** (`academy/causality.py`): every strategy outside the built-in random-search family must pass determinism, truncation
+and future-tamper checks on the development data before anything is recorded; failures appear in `rejected_strategies` and nothing is
+written to the registry. The gate catches unseeded randomness, hidden global state and dependence on data beyond the cut. It **cannot**
+catch a strategy that reads data through a side channel (files, globals, the archive). JSON specs have no such channel; strategies written
+as arbitrary Python code (next milestone) must run in an isolated runner without data access.
+
+**View hardening:** `MarketView` now hands strategies independent read-only copies (window-only, at most 3000 bars). Before, a slice of the
+full array leaked future bars through `array.base`; a test pins this. Simulation was also sped up ~3x (timestamps boxed once, one copy per bar).
+
+**Market comparison** (`academy_cli compare`, `academy/compare.py`): the same strategies (specs and/or `--experiment-id` transfers of earlier
+experiments) run on several instruments through the normal recording path, so each cell is deduplicated and counted as a trial on its market.
+The report gives per-market validation metrics (return, Sharpe, drawdown, trades, hit rate, avg R, cost per trade, shortfall), whether a cell
+exceeds that market's luck benchmark, a transfer count per strategy and the best strategy per market. It uses only train/validation data
+(never a final-test window). Choosing the best cell is itself selection on validation: confirm one candidate once on its own fresh test window.
+
+```bash
+python -m market_data.academy_cli compare --instruments GOLD,EURUSD,SP500 --interval 1d --specs-dir strategies
+```
+
 ## Research integrity: protecting the final test without manual approvals
 
 Saba needs no per-experiment approval; the final test is protected by code (`academy/integrity.py`), recorded in the registry:
