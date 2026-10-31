@@ -49,8 +49,16 @@ USAGE = {
     "variants": {"command": "variants", "spec_file": "ema_trend.json", "n": 3, "seed": 1},
     "test_strategy": {"command": "test_strategy", "code_file": "my_strategy.py", "instrument": "GOLD", "params": {}},
     "halt": {"command": "halt", "reason": "text"},
+    "run_study": {"command": "run_study", "cycle_id": 1, "study": {"name": "sma grid", "strategy": "sma_cross", "base_params": {"stop_loss_pct": 2.0},
+                  "grid": {"short": [5, 10, 20], "long": [40, 80, 150]}, "instruments": ["GOLD", "EURUSD", "SP500"], "interval": "1d",
+                  "train_bars": 750, "test_bars": 125, "code_file": "optional: your own strategy file instead of strategy/base_params (grid paths then start with params.)"}, "workers": 2},
+    "freeze_candidate": {"command": "freeze_candidate", "label": "sma 10/40 on 3 markets", "strategy": "sma_cross", "params": {"short": 10, "long": 40, "stop_loss_pct": 2.0},
+                         "instruments": ["GOLD", "EURUSD", "SP500"], "interval": "1d",
+                         "forecast": {"p_positive": 0.45, "expected_hit_rate": 0.42, "expected_expectancy": 0.5}, "rules": {"min_trades": 30, "min_days": 60},
+                         "study_sha256": "optional"},
+    "forward_report": {"command": "forward_report", "update": True, "fetch": False},
 }
-COMMANDS = ("help", "test_strategy", "status", "start_cycle", "finish_cycle", "register_hypothesis", "run_hypothesis", "propose_next", "variants",
+COMMANDS = ("run_study", "freeze_candidate", "forward_report", "help", "test_strategy", "status", "start_cycle", "finish_cycle", "register_hypothesis", "run_hypothesis", "propose_next", "variants",
             "add_lesson", "search_lessons", "verify_lesson", "notebook", "final_test", "conclude_hypothesis", "halt")
 
 
@@ -131,6 +139,39 @@ def handle(req: dict, *, root, strategies_dir, owner_id="local", org_id="persona
     orch = Orchestrator(archive.root, registry, archive, memory, ledger)
     sdir = Path(strategies_dir)
     try:
+        if cmd == "run_study":
+            from .academy.study import StudySpec, run_recorded_study
+            study = req.get("study")
+            if not isinstance(study, dict):
+                raise ValueError("study must be an object")
+            study = {k: v for k, v in study.items() if k != "max_cells"}
+            if "code_file" in study:         # own code: the file is read from <strategies>/code and becomes the (sandboxed) base parameters
+                code_params = _load_code({"code_file": study.pop("code_file"), "params": study.get("base_params", {})}, sdir)
+                study["strategy"], study["base_params"] = "sandboxed", code_params
+            spec = StudySpec.from_dict(study)
+            orch.charge(_int(req, "cycle_id"), 1)
+            out = run_recorded_study(registry, archive, spec, workers=min(max(int(req.get("workers", 1)), 1), 2))
+            out["cell_table"] = sorted([c for c in out["cell_table"] if c.get("valid")], key=lambda c: -(c.get("oos_sharpe_annualized") or -9))[:8]
+            return {"ok": True, **out}
+        if cmd == "freeze_candidate":
+            from .academy.forward import ForwardTracker
+            item = _experiment({"label": _str(req, "label", maxlen=120), **{k: req[k] for k in ("strategy", "params", "spec", "spec_file", "code", "code_file", "seed", "limits") if k in req}}, sdir)
+            tr = ForwardTracker(Path(archive.root) / "academy_memory.sqlite3")
+            try:
+                fid = tr.freeze(archive, label=item["label"], strategy=item["strategy"], params=item["params"], instruments=req.get("instruments") or [],
+                                interval=req.get("interval", "1d"), forecast=req.get("forecast"), rules=req.get("rules"), study_sha256=req.get("study_sha256"),
+                                note=str(req.get("note", ""))[:300])
+            finally:
+                tr.close()
+            return {"ok": True, "frozen_id": fid, "note": "the plan, data cutoff, rules and your forecast are now immutable"}
+        if cmd == "forward_report":
+            from .academy.forward import ForwardTracker
+            tr = ForwardTracker(Path(archive.root) / "academy_memory.sqlite3")
+            try:
+                snaps = tr.update(archive, fetch=bool(req.get("fetch"))) if req.get("update", True) else []
+                return {"ok": True, "snapshots": snaps, "forecast_report": tr.forecast_report()}
+            finally:
+                tr.close()
         if cmd == "help":
             return {"ok": True, "commands": USAGE, "tips": "start_cycle returns a briefing (status, notebook, ranking). Combine steps: "
                     "register_hypothesis with run_in_cycle runs it at once; add_lesson with conclude_hypothesis closes the hypothesis. "

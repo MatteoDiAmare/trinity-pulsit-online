@@ -30,6 +30,8 @@ random-control runs. `final-test` runs one chosen experiment on the untouched te
 (`academy:final_test`); a repeat needs `--force` and is then no longer an unbiased test.
 `--ledger-dir` writes `trades.csv`, `decisions.csv`, `orders.csv`, `equity.csv`.
 
+Walk-forward, multi-market parameter studies with multiple-testing correction and forward tracking of frozen strategies: [ACADEMY_STUDIES.md](ACADEMY_STUDIES.md); development plan: [ACADEMY_ROADMAP.md](ACADEMY_ROADMAP.md).
+
 The autonomous research loop and long-term memory are described in [ACADEMY_AUTONOMY.md](ACADEMY_AUTONOMY.md), isolated Python strategies in [ACADEMY_SANDBOX.md](ACADEMY_SANDBOX.md), and the state of the integration into the deployed agent in [ACADEMY_INTEGRATION.md](ACADEMY_INTEGRATION.md).
 
 `train`/`final-test` also persist full run logs; `export` writes versioned private-by-design JSON for a Supabase-Auth-protected

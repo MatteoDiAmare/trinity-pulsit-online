@@ -31,6 +31,15 @@ def main(argv=None):
     rp.add_argument("--random-runs", type=int, default=100)
     rp.add_argument("--out", help="Write markdown here (JSON goes to <out>.json)")
     rp.add_argument("--transcript", help="Text file with the agent's narration (one line per statement) to quote earlier-lesson references")
+    st = sub.add_parser("study", help="Walk-forward, multi-market parameter study with multiple-testing correction (JSON spec file)")
+    st.add_argument("--spec", required=True)
+    st.add_argument("--workers", type=int, default=1)
+    st.add_argument("--full", action="store_true", help="print the full cell and fold tables")
+    fz = sub.add_parser("freeze", help="Freeze a strategy for forward tracking (JSON file: label, strategy, params, instruments, interval, forecast, rules)")
+    fz.add_argument("--plan", required=True)
+    fu = sub.add_parser("forward-update", help="Re-evaluate every frozen candidate on the bars that arrived after its cutoff")
+    fu.add_argument("--fetch", action="store_true", help="refresh the archive from the data provider first (network)")
+    sub.add_parser("forward-report", help="Frozen candidates, their latest snapshot and the scoring of Saba's forecasts")
     sub.add_parser("resume", help="Operator only: lift a halt set by Saba or by the operator")
     sub.add_parser("halt", help="Stop all new research cycles").add_argument("--reason", required=True)
     for name in ("train", "train-specs", "compare", "final-test", "export"):
@@ -95,6 +104,26 @@ def main(argv=None):
                 Path(args.out).write_text(md, encoding="utf-8")
                 Path(args.out + ".json").write_text(json.dumps(rep, indent=1, default=str), encoding="utf-8")
             print(md)
+            return 0
+        if args.command in ("study", "freeze", "forward-update", "forward-report"):
+            from .academy.forward import ForwardTracker
+            from .academy.study import StudySpec, run_recorded_study
+            if args.command == "study":
+                out = run_recorded_study(registry, archive, StudySpec.from_dict(json.loads(Path(args.spec).read_text())), workers=args.workers)
+                if not args.full:
+                    out = {k: v for k, v in out.items() if k not in ("cell_table",)}
+                    out["fold_table"] = [{k: v for k, v in r.items() if k in ("fold", "selected_cell", "train_score", "oos_return_pct", "oos_trades")} for r in out["fold_table"]]
+            else:
+                tr = ForwardTracker(Path(archive.root) / "academy_memory.sqlite3")
+                if args.command == "freeze":
+                    plan = json.loads(Path(args.plan).read_text())
+                    out = {"frozen_id": tr.freeze(archive, **plan)}
+                elif args.command == "forward-update":
+                    out = {"snapshots": tr.update(archive, fetch=args.fetch)}
+                else:
+                    out = {"forecast_report": tr.forecast_report(), "active": [{"id": c["id"], "label": c["label"], "last": (tr.history(c["id"]) or [{}])[-1].get("verdict")} for c in tr.active()]}
+                tr.close()
+            print(json.dumps(out, indent=1, default=str))
             return 0
         if args.command in ("resume", "halt"):
             from .academy.orchestrator import Orchestrator
