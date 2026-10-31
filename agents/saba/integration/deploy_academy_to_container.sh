@@ -26,8 +26,10 @@ mkdir -p "$BASE" "$BASE/market_data"
 rm -rf "$BASE/academy.new" && mkdir "$BASE/academy.new"
 tar -xf "$HOME/.tmp/academy.tar" -C "$BASE/academy.new" --strip-components=1
 rm -f "$HOME/.tmp/academy.tar"
-[ -d "$BASE/venv" ] || python3 -m venv --system-site-packages "$BASE/venv"
-"$BASE/venv/bin/python" -m pip install --quiet --disable-pip-version-check "pyarrow>=17" "yfinance>=0.2.65,<2"
+# fully self-contained venv (the sandbox worker runs `python -I`, which ignores the user site); rebuild an older one that used system packages
+if [ -f "$BASE/venv/pyvenv.cfg" ] && grep -q "include-system-site-packages = true" "$BASE/venv/pyvenv.cfg"; then rm -rf "$BASE/venv"; fi
+[ -d "$BASE/venv" ] || python3 -m venv "$BASE/venv"
+"$BASE/venv/bin/python" -m pip install --quiet --disable-pip-version-check "numpy>=2" "pandas>=2.2,<4" "pyarrow>=17" "yfinance>=0.2.65,<2"
 rm -rf "$BASE/academy.old"
 [ -d "$BASE/academy" ] && mv "$BASE/academy" "$BASE/academy.old"
 mv "$BASE/academy.new" "$BASE/academy"
@@ -40,7 +42,7 @@ cd "$BASE/academy"
 exec "$BASE/venv/bin/python" -m market_data.academy_bridge --root "$BASE/market_data" --strategies-dir "$HOME/strategies" "$@"
 EOS
 chmod 755 "$BASE/academy-bridge"
-mkdir -p "$HOME/strategies"
+mkdir -p "$HOME/strategies/code"
 cp -n "$BASE"/academy/strategies/*.json "$HOME/strategies/" 2>/dev/null || true   # seed examples once; Saba's own specs live in her repo
 echo "installed academy $(cat "$BASE/academy/ACADEMY_CODE_VERSION") into $BASE"
 INNER

@@ -1,24 +1,45 @@
 ---
-description: One autonomous Academy research cycle (budgeted, evidence-linked, no live trading)
-allowed-tools: Bash(python -m market_data.academy_bridge:*), Read
+description: One autonomous Academy research cycle (budgeted, evidence-linked, simulation only)
+allowed-tools: Bash(~/.local/share/saba/academy-bridge:*), Read, Write, Edit, Glob, Grep
 ---
-PROPOSED command file for Saba's operational repository (`saba-pulsit-online`, `.claude/commands/academy-cycle.md`).
-It is not installed or verified in the running Trinity agent; adapt and test it there.
+Run one Academy research cycle. This is simulation research on historical data: there is no broker, no order and no money involved.
+You choose the direction, instruments and strategies yourself; no approval is needed for research. The budget and the integrity rules
+are enforced by the bridge, not by this text.
 
-Run one research cycle. Use ONLY the Academy bridge, one JSON object per call on stdin, e.g.
-`echo '{"command":"status"}' | python -m market_data.academy_bridge --root "$SABA_MARKET_DATA_DIR" --strategies-dir strategies`
+Call the bridge ONLY like this (one JSON object per call, answer is one JSON object):
 
-1. `status`. If halted, stop and report why. Read `research_notebook.md` (call `notebook` with `"write": true`).
-2. `start_cycle`. If it is denied (cycle budget or halt), end the turn and say so. Do not retry.
-3. `propose_next` and `search_lessons`: continue open hypotheses and avoid dead ends. If there is nothing worth testing, think of a new
-   hypothesis (a new strategy spec, a variant via `variants`, another market) and `register_hypothesis` BEFORE running it:
-   state what you expect, the plan (experiments x instruments) and a trial budget.
-4. `run_hypothesis` for at most the experiments the cycle still has. Never exceed the budget; the bridge enforces it anyway.
-5. Read the `analysis`. Record what you learned with `add_lesson`, always citing the experiment ids as evidence:
-   `refuted` for clear negatives, `candidate` for validation-only positives, `inconclusive` when trades are too few.
-   A strategy that exceeds the luck benchmark in a market may get ONE `final_test`; the result decides `supported` (needs a positive consumed
-   final test). Never try to repeat a final test; the protection will refuse.
-6. `conclude_hypothesis` when settled, then `finish_cycle`. End with a short report: what was tested, what was learned, what is next.
+~/.local/share/saba/academy-bridge <<'JSON'
+{"command": "status"}
+JSON
 
-Rules: results are simulations, not realized revenue. No live orders exist. Never claim an edge from validation data alone. If something looks
-wrong (drawdown, shortfall > 0, data gaps), `halt` with a reason; only the operator resumes.
+Procedure
+1. `status`. If `halted` is set, stop and report the reason. `notebook` (with `"write": true`) shows your open hypotheses, findings,
+   dead ends and which test windows are already consumed. Read it before choosing what to do.
+2. `start_cycle`. If denied (halt or cycle budget), end the turn and say so. Do not retry.
+3. Decide what to learn. Use `search_lessons` and `propose_next`; do not repeat dead ends without a new reason. Ideas can be a JSON
+   strategy (`strategies/*.json`), a variant (`variants`), your own Python strategy (see below), another instrument (GOLD, EURUSD,
+   SP500) or a comparison across instruments.
+4. `register_hypothesis` BEFORE running: statement, family, `trial_budget`, instruments, interval and the exact experiments. The plan is
+   hashed; `run_hypothesis` executes exactly that plan. A new idea is a new (child) hypothesis.
+5. `run_hypothesis` (stays within the cycle's experiment budget). Read `analysis`: it suggests confirm / vary / drop, nothing more.
+6. `add_lesson` with the experiment ids as evidence. `refuted` for clear negatives, `candidate` for validation-only positives,
+   `inconclusive` when trades are too few. Only a consumed, positive `final_test` supports `supported`.
+7. A strategy that clearly beats the luck benchmark may get ONE `final_test`. A test window can confirm only a few experiments and
+   is consumed afterwards; if the bridge says a window is exhausted or no fresh data exists, do other research and come back after new
+   data has arrived. Never try to work around it.
+8. `conclude_hypothesis` when settled, `finish_cycle`, then a short report: what you tested, what you learned, what you will do next.
+
+Your own Python strategies
+- Write `strategies/code/<name>.py` defining exactly one `class Strategy` with `__init__(self, params)` and `on_bar(self, view, position)`.
+  `view` has read-only numpy arrays `open high low close volume`, `n`, `total` and `timestamp` (`.hour .weekday() .isoformat()`).
+  Return `Decision("BUY"|"SELL"|"CLOSE"|"ABSTAIN", size=1.0, stop_loss_pct=..., take_profit_pct=..., reason="...")` or `None`.
+  Every BUY/SELL needs `stop_loss_pct`. Available: `np` (a curated numpy subset), `math`, `statistics`, `rng.uniform()` (seeded).
+- The code runs in an isolated worker with no files, network, secrets or processes, and sees only bars up to now. A restricted subset
+  of Python is enforced; the policy error tells you what is not allowed.
+- First call `test_strategy` (`code_file`, `instrument`): it checks the policy and causality and runs a quick simulation on development
+  data only, and records nothing. Then register a hypothesis with `{"label": "...", "code_file": "<name>.py", "params": {...}}`.
+- Improve a strategy by editing the file (git keeps the versions) and registering the change as a new hypothesis; the code hash is part of
+  every experiment, so results are always traceable to the exact code.
+
+Rules: results are simulations, not realized revenue. If something looks wrong (shortfall above zero, drawdown halts, data gaps),
+`halt` with a reason; only the operator resumes. Never put credentials, account details or secrets into strategies or lessons.

@@ -1,0 +1,124 @@
+From 5b30ee7ade9fa3ee2450ac034bcc09efda31e857 Mon Sep 17 00:00:00 2001
+From: MatteoDiAmare <bergstrom.mats@gmail.com>
+Date: Sat, 31 Oct 2026 17:13:13 +0100
+Subject: [PATCH] feat: /academy-cycle command, strategy folders and disabled
+ schedule for the Academy integration
+
+Adds only new files plus the template schedule (disabled); does not touch CLAUDE.md or README.md, so it does not conflict with docs/saba-autonomy-two-accounts. Merge that mandate first.
+---
+ .claude/commands/academy-cycle.md | 45 +++++++++++++++++++++++++++++++
+ docs/academy-integration.md       | 15 +++++++++++
+ strategies/code/README.md         |  6 +++++
+ template.yaml                     |  9 ++++++-
+ 4 files changed, 74 insertions(+), 1 deletion(-)
+ create mode 100755 .claude/commands/academy-cycle.md
+ create mode 100644 docs/academy-integration.md
+ create mode 100644 strategies/code/README.md
+
+diff --git a/.claude/commands/academy-cycle.md b/.claude/commands/academy-cycle.md
+new file mode 100755
+index 0000000..b27cacd
+--- /dev/null
++++ b/.claude/commands/academy-cycle.md
+@@ -0,0 +1,45 @@
++---
++description: One autonomous Academy research cycle (budgeted, evidence-linked, simulation only)
++allowed-tools: Bash(~/.local/share/saba/academy-bridge:*), Read, Write, Edit, Glob, Grep
++---
++Run one Academy research cycle. This is simulation research on historical data: there is no broker, no order and no money involved.
++You choose the direction, instruments and strategies yourself; no approval is needed for research. The budget and the integrity rules
++are enforced by the bridge, not by this text.
++
++Call the bridge ONLY like this (one JSON object per call, answer is one JSON object):
++
++~/.local/share/saba/academy-bridge <<'JSON'
++{"command": "status"}
++JSON
++
++Procedure
++1. `status`. If `halted` is set, stop and report the reason. `notebook` (with `"write": true`) shows your open hypotheses, findings,
++   dead ends and which test windows are already consumed. Read it before choosing what to do.
++2. `start_cycle`. If denied (halt or cycle budget), end the turn and say so. Do not retry.
++3. Decide what to learn. Use `search_lessons` and `propose_next`; do not repeat dead ends without a new reason. Ideas can be a JSON
++   strategy (`strategies/*.json`), a variant (`variants`), your own Python strategy (see below), another instrument (GOLD, EURUSD,
++   SP500) or a comparison across instruments.
++4. `register_hypothesis` BEFORE running: statement, family, `trial_budget`, instruments, interval and the exact experiments. The plan is
++   hashed; `run_hypothesis` executes exactly that plan. A new idea is a new (child) hypothesis.
++5. `run_hypothesis` (stays within the cycle's experiment budget). Read `analysis`: it suggests confirm / vary / drop, nothing more.
++6. `add_lesson` with the experiment ids as evidence. `refuted` for clear negatives, `candidate` for validation-only positives,
++   `inconclusive` when trades are too few. Only a consumed, positive `final_test` supports `supported`.
++7. A strategy that clearly beats the luck benchmark may get ONE `final_test`. A test window can confirm only a few experiments and
++   is consumed afterwards; if the bridge says a window is exhausted or no fresh data exists, do other research and come back after new
++   data has arrived. Never try to work around it.
++8. `conclude_hypothesis` when settled, `finish_cycle`, then a short report: what you tested, what you learned, what you will do next.
++
++Your own Python strategies
++- Write `strategies/code/<name>.py` defining exactly one `class Strategy` with `__init__(self, params)` and `on_bar(self, view, position)`.
++  `view` has read-only numpy arrays `open high low close volume`, `n`, `total` and `timestamp` (`.hour .weekday() .isoformat()`).
++  Return `Decision("BUY"|"SELL"|"CLOSE"|"ABSTAIN", size=1.0, stop_loss_pct=..., take_profit_pct=..., reason="...")` or `None`.
++  Every BUY/SELL needs `stop_loss_pct`. Available: `np` (a curated numpy subset), `math`, `statistics`, `rng.uniform()` (seeded).
++- The code runs in an isolated worker with no files, network, secrets or processes, and sees only bars up to now. A restricted subset
++  of Python is enforced; the policy error tells you what is not allowed.
++- First call `test_strategy` (`code_file`, `instrument`): it checks the policy and causality and runs a quick simulation on development
++  data only, and records nothing. Then register a hypothesis with `{"label": "...", "code_file": "<name>.py", "params": {...}}`.
++- Improve a strategy by editing the file (git keeps the versions) and registering the change as a new hypothesis; the code hash is part of
++  every experiment, so results are always traceable to the exact code.
++
++Rules: results are simulations, not realized revenue. If something looks wrong (shortfall above zero, drawdown halts, data gaps),
++`halt` with a reason; only the operator resumes. Never put credentials, account details or secrets into strategies or lessons.
+diff --git a/docs/academy-integration.md b/docs/academy-integration.md
+new file mode 100644
+index 0000000..bf31e45
+--- /dev/null
++++ b/docs/academy-integration.md
+@@ -0,0 +1,15 @@
++# Academy integration (runtime wiring)
++
++Saba Academy is Saba's research tool (code: `MatteoDiAmare/trinity-pulsit-online`, `agents/saba`, branch `feature/saba-foundation-bezier`).
++It runs inside this agent's container; it is not a second agent and has no UI.
++
++- Installed into the persistent volume at `~/.local/share/saba/` (`academy/` code pinned to a commit and stamped in `ACADEMY_CODE_VERSION`,
++  a self-contained `venv/`, `market_data/` = archive, registry, ledgers, hypotheses and lessons). Installer: `integration/deploy_academy_to_container.sh`
++  in the Academy repo. Nothing is installed outside the volume.
++- Entry point for the agent: `~/.local/share/saba/academy-bridge` (one JSON object on stdin, one on stdout; fixed command allowlist).
++- `/academy-cycle` (this repo, `.claude/commands/academy-cycle.md`) is one budgeted research cycle. Default budget: 20 experiments per cycle,
++  4 cycles per rolling 24 h (file `academy_budget.json` on the volume overrides). The schedule is `0 */6 * * *` UTC (`template.yaml`, disabled
++  by default; the operator enables it through Trinity).
++- Your strategies: `strategies/*.json` (specs) and `strategies/code/*.py` (isolated Python).
++- No broker, no orders, no credentials. Everything is simulation on historical data.
++- Merge order matters: the mandate in `docs/saba-autonomy-two-accounts` replaces the older "no schedules / ask for approval" text in `CLAUDE.md`.
+diff --git a/strategies/code/README.md b/strategies/code/README.md
+new file mode 100644
+index 0000000..1f58b49
+--- /dev/null
++++ b/strategies/code/README.md
+@@ -0,0 +1,6 @@
++# Saba's own strategy code
++
++Python strategies written by Saba live here (`<name>.py`, exactly one `class Strategy` with `on_bar(self, view, position)`).
++They are versioned in git and only ever run in the Academy's isolated worker (no files, network, secrets or processes; one bar at a
++time, never the future). Test with the bridge command `test_strategy`, then register a hypothesis with `code_file`. Details:
++`.claude/commands/academy-cycle.md` and `docs/academy-integration.md`. JSON strategy specs go in `strategies/*.json`.
+diff --git a/template.yaml b/template.yaml
+index ac49b38..590ceae 100644
+--- a/template.yaml
++++ b/template.yaml
+@@ -38,7 +38,14 @@ capabilities:
+   - trading_education
+   - human_escalation
+ metrics: []
+-schedules: []
++schedules:
++  # Academy research cycle: 4 per day at most (the bridge enforces the budget regardless of this cron).
++  # Disabled in the template; the operator enables it in Trinity once the autonomy mandate is merged.
++  - name: Academy research cycle
++    cron: "0 */6 * * *"
++    message: "/academy-cycle"
++    timezone: "UTC"
++    enabled: false
+ 
+ x-capabilities:
+   role: analysis
+-- 
+2.53.0
+
