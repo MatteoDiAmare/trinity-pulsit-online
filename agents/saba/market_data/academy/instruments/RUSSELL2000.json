@@ -1,0 +1,25 @@
+{
+  "id": "RUSSELL2000",
+  "symbol": "RTY=F",
+  "name": "Russell 2000 (E-mini continuous futures proxy)",
+  "asset_class": "equity_index_future",
+  "quote_currency": "USD",
+  "tick_size": 0.1,
+  "min_quantity": 0.01,
+  "quantity_step": 0.01,
+  "costs": {
+    "fee_bps": 0.5,
+    "spread_bps": 2.0,
+    "slippage_bps": 1.5
+  },
+  "max_leverage": 5.0,
+  "broker_max_leverage_assumed": 20.0,
+  "maintenance_margin_fraction": 0.04,
+  "gap_stress_pct": 11.0,
+  "min_stop_pct": 0.45,
+  "trading_hours_per_day": 23.0,
+  "trading_days_per_year": 252,
+  "timezone": "America/New_York",
+  "sessions": "Sun 18:00 - Fri 17:00 ET, daily 1h break",
+  "notes": "Continuous futures series from the free provider: contract-roll gaps are not adjusted. Broker terms unverified. Short free history (from 2017). gap_stress_pct = 1.25 x the worst overnight gap 8.4% in the cleaned usable history (floor per asset class, capped at 25 % because unadjusted contract rolls inflate the historical maximum); min_stop_pct = 25 % of the median daily range 1.83%."
+}

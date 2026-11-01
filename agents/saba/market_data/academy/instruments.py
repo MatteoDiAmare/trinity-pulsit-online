@@ -91,3 +91,17 @@ def load_instrument(id_or_symbol: str) -> InstrumentSpec:
         if spec.symbol == id_or_symbol:
             return spec
     raise ValueError(f"unknown instrument {id_or_symbol!r}; available: {sorted(specs)}")
+
+
+PROFILE_PATH = Path(__file__).resolve().parent / "data" / "profiles.json"
+
+
+def load_profiles() -> dict:
+    """Data profiles generated from the free history (usable-from dates, removed glitch bars, gap statistics). {} if none were generated."""
+    return json.loads(PROFILE_PATH.read_text(encoding="utf-8"))["profiles"] if PROFILE_PATH.is_file() else {}
+
+
+def usable_from(instrument_id: str) -> str | None:
+    """First date from which the instrument's free history is dense enough to use; None if unknown or if the series is not usable at all."""
+    p = load_profiles().get(instrument_id)
+    return p.get("usable_from") if p and p.get("usable") else None

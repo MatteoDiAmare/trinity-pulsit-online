@@ -1,0 +1,399 @@
+{
+ "generated_from": "free Yahoo Finance daily history",
+ "profiles": {
+  "AUDUSD": {
+   "bars_downloaded": 5175,
+   "bars_usable": 5010,
+   "daily_vol_pct": 0.7900921904765854,
+   "findings": [],
+   "first_bar": "2006-05-15",
+   "flat_bar_share": 0.0027944111776447107,
+   "gap_p999_pct": 3.0512695386841466,
+   "glitch_bars_removed": [
+    {
+     "date": "2022-10-09",
+     "reason": "bad_open"
+    }
+   ],
+   "last_bar": "2026-10-31",
+   "max_overnight_gap_pct": 5.6738561768367335,
+   "median_daily_range_pct": 0.8086651700016558,
+   "quality_status_after_cleaning": "pass",
+   "symbol": "AUDUSD=X",
+   "usable": true,
+   "usable_from": "2007-01-01"
+  },
+  "BTCUSD": {
+   "bars_downloaded": 4428,
+   "bars_usable": 4320,
+   "daily_vol_pct": 3.4330367895317577,
+   "findings": [
+    "largest single-day move 37% on 2020-03-12 (real event or data error; kept)",
+    "2 overnight gaps above 8% (contract rolls in unadjusted continuous futures or real events)",
+    "2 provider glitch bars (spike-and-revert or contradicting open); a study uses the cleaned view"
+   ],
+   "first_bar": "2014-09-17",
+   "flat_bar_share": 0.0,
+   "gap_p999_pct": 2.8172689843460352,
+   "glitch_bars_removed": [
+    {
+     "date": "2017-01-04",
+     "reason": "spike_reversal"
+    },
+    {
+     "date": "2026-02-05",
+     "reason": "spike_reversal"
+    }
+   ],
+   "last_bar": "2026-10-31",
+   "max_overnight_gap_pct": 14.126666582499892,
+   "median_daily_range_pct": 3.3312140731972266,
+   "quality_status_after_cleaning": "warn",
+   "symbol": "BTC-USD",
+   "usable": true,
+   "usable_from": "2015-01-01"
+  },
+  "COPPER": {
+   "bars_downloaded": 6272,
+   "bars_usable": 4433,
+   "daily_vol_pct": 1.5974716502216015,
+   "findings": [
+    "9 overnight gaps above 8% (contract rolls in unadjusted continuous futures or real events)",
+    "7 calendar gaps longer than 6 days (missing data or non-trading periods)"
+   ],
+   "first_bar": "2000-08-30",
+   "flat_bar_share": 0.018272050530115047,
+   "gap_p999_pct": 6.706073271997308,
+   "glitch_bars_removed": [],
+   "last_bar": "2026-10-30",
+   "max_overnight_gap_pct": 17.504494639520107,
+   "median_daily_range_pct": 1.2270845824333794,
+   "quality_status_after_cleaning": "warn",
+   "symbol": "HG=F",
+   "usable": true,
+   "usable_from": "2009-01-05"
+  },
+  "CRUDE_WTI": {
+   "bars_downloaded": 6567,
+   "bars_usable": 6478,
+   "daily_vol_pct": 2.6081213477311747,
+   "findings": [
+    "largest single-day move 25% on 2020-04-30 (real event or data error; kept)",
+    "12 overnight gaps above 8% (contract rolls in unadjusted continuous futures or real events)"
+   ],
+   "first_bar": "2000-08-23",
+   "flat_bar_share": 0.0,
+   "gap_p999_pct": 9.497276687964986,
+   "glitch_bars_removed": [],
+   "last_bar": "2026-10-30",
+   "max_overnight_gap_pct": 28.188289234640628,
+   "median_daily_range_pct": 2.854947138135675,
+   "quality_status_after_cleaning": "warn",
+   "symbol": "CL=F",
+   "usable": true,
+   "usable_from": "2001-01-02"
+  },
+  "DOW30": {
+   "bars_downloaded": 6157,
+   "bars_usable": 5970,
+   "daily_vol_pct": 1.107953204018246,
+   "findings": [
+    "1 overnight gaps above 8% (contract rolls in unadjusted continuous futures or real events)"
+   ],
+   "first_bar": "2002-04-05",
+   "flat_bar_share": 0.0005025125628140704,
+   "gap_p999_pct": 2.748105256498949,
+   "glitch_bars_removed": [
+    {
+     "date": "2011-08-08",
+     "reason": "spike_reversal"
+    }
+   ],
+   "last_bar": "2026-10-30",
+   "max_overnight_gap_pct": 8.647166268546847,
+   "median_daily_range_pct": 1.1144752811906087,
+   "quality_status_after_cleaning": "warn",
+   "symbol": "YM=F",
+   "usable": true,
+   "usable_from": "2003-01-02"
+  },
+  "EURUSD": {
+   "bars_downloaded": 5818,
+   "bars_usable": 5791,
+   "daily_vol_pct": 0.5784160591378863,
+   "findings": [
+    "3 calendar gaps longer than 6 days (missing data or non-trading periods)"
+   ],
+   "first_bar": "2003-12-01",
+   "flat_bar_share": 0.0024175444655499916,
+   "gap_p999_pct": 2.5635996097029237,
+   "glitch_bars_removed": [
+    {
+     "date": "2008-01-08",
+     "reason": "spike_reversal"
+    },
+    {
+     "date": "2008-02-08",
+     "reason": "spike_reversal"
+    },
+    {
+     "date": "2008-10-07",
+     "reason": "spike_reversal"
+    },
+    {
+     "date": "2008-12-08",
+     "reason": "spike_reversal"
+    }
+   ],
+   "last_bar": "2026-10-30",
+   "max_overnight_gap_pct": 5.966523272678015,
+   "median_daily_range_pct": 0.622549320071309,
+   "quality_status_after_cleaning": "warn",
+   "symbol": "EURUSD=X",
+   "usable": true,
+   "usable_from": "2004-01-01"
+  },
+  "GBPUSD": {
+   "bars_downloaded": 5855,
+   "bars_usable": 5832,
+   "daily_vol_pct": 0.5857224416356446,
+   "findings": [],
+   "first_bar": "2003-12-01",
+   "flat_bar_share": 0.0030864197530864196,
+   "gap_p999_pct": 2.890851688101502,
+   "glitch_bars_removed": [],
+   "last_bar": "2026-10-31",
+   "max_overnight_gap_pct": 7.647313826328849,
+   "median_daily_range_pct": 0.6434298752230185,
+   "quality_status_after_cleaning": "pass",
+   "symbol": "GBPUSD=X",
+   "usable": true,
+   "usable_from": "2004-01-01"
+  },
+  "GOLD": {
+   "bars_downloaded": 6127,
+   "bars_usable": 4451,
+   "daily_vol_pct": 1.1085939121220854,
+   "findings": [
+    "4 overnight gaps above 8% (contract rolls in unadjusted continuous futures or real events)",
+    "33 calendar gaps longer than 6 days (missing data or non-trading periods)",
+    "12.3% of bars have no range"
+   ],
+   "first_bar": "2000-08-30",
+   "flat_bar_share": 0.03302628622781397,
+   "gap_p999_pct": 3.277819603974236,
+   "glitch_bars_removed": [],
+   "last_bar": "2026-10-30",
+   "max_overnight_gap_pct": 5.54742737884466,
+   "median_daily_range_pct": 1.1346151218889429,
+   "quality_status_after_cleaning": "warn",
+   "symbol": "GC=F",
+   "usable": true,
+   "usable_from": "2009-01-02"
+  },
+  "NASDAQ100": {
+   "bars_downloaded": 6571,
+   "bars_usable": 6499,
+   "daily_vol_pct": 1.5550939286666179,
+   "findings": [
+    "1 overnight gaps above 8% (contract rolls in unadjusted continuous futures or real events)"
+   ],
+   "first_bar": "2000-09-18",
+   "flat_bar_share": 0.0,
+   "gap_p999_pct": 3.6942311117944016,
+   "glitch_bars_removed": [],
+   "last_bar": "2026-10-30",
+   "max_overnight_gap_pct": 8.35780066946976,
+   "median_daily_range_pct": 1.6520210896309315,
+   "quality_status_after_cleaning": "warn",
+   "symbol": "NQ=F",
+   "usable": true,
+   "usable_from": "2001-01-02"
+  },
+  "NATGAS": {
+   "bars_downloaded": 6541,
+   "bars_usable": 6456,
+   "daily_vol_pct": 3.839930315168697,
+   "findings": [
+    "largest single-day move 47% on 2026-01-29 (real event or data error; kept)",
+    "70 overnight gaps above 8% (contract rolls in unadjusted continuous futures or real events)"
+   ],
+   "first_bar": "2000-08-30",
+   "flat_bar_share": 0.00015489467162329616,
+   "gap_p999_pct": 23.11598811000733,
+   "glitch_bars_removed": [
+    {
+     "date": "2018-11-14",
+     "reason": "spike_reversal"
+    }
+   ],
+   "last_bar": "2026-10-30",
+   "max_overnight_gap_pct": 49.83914096699763,
+   "median_daily_range_pct": 4.133081071916308,
+   "quality_status_after_cleaning": "warn",
+   "symbol": "NG=F",
+   "usable": true,
+   "usable_from": "2001-01-02"
+  },
+  "RUSSELL2000": {
+   "bars_downloaded": 2345,
+   "bars_usable": 2223,
+   "daily_vol_pct": 1.541982574248782,
+   "findings": [
+    "1 overnight gaps above 8% (contract rolls in unadjusted continuous futures or real events)"
+   ],
+   "first_bar": "2017-07-10",
+   "flat_bar_share": 0.0,
+   "gap_p999_pct": 4.255401890554923,
+   "glitch_bars_removed": [],
+   "last_bar": "2026-10-30",
+   "max_overnight_gap_pct": 8.439638533777117,
+   "median_daily_range_pct": 1.8306200332521387,
+   "quality_status_after_cleaning": "warn",
+   "symbol": "RTY=F",
+   "usable": true,
+   "usable_from": "2018-01-02"
+  },
+  "SILVER": {
+   "bars_downloaded": 6326,
+   "bars_usable": 461,
+   "daily_vol_pct": 3.3209982712040036,
+   "findings": [
+    "largest single-day move 31% on 2026-01-30 (real event or data error; kept)",
+    "16 overnight gaps above 8% (contract rolls in unadjusted continuous futures or real events)",
+    "7 calendar gaps longer than 6 days (missing data or non-trading periods)",
+    "26.6% of bars have no range"
+   ],
+   "first_bar": "2000-08-30",
+   "flat_bar_share": 0.09327548806941431,
+   "gap_p999_pct": 8.958153394145278,
+   "glitch_bars_removed": [
+    {
+     "date": "2001-09-19",
+     "reason": "spike_reversal"
+    }
+   ],
+   "last_bar": "2026-10-30",
+   "max_overnight_gap_pct": 9.280500638898804,
+   "median_daily_range_pct": 1.6740019786766716,
+   "quality_status_after_cleaning": "warn",
+   "symbol": "SI=F",
+   "usable": true,
+   "usable_from": "2025-01-02"
+  },
+  "SOYBEANS": {
+   "bars_downloaded": 5724,
+   "bars_usable": 5653,
+   "daily_vol_pct": 1.6745553042205306,
+   "findings": [
+    "largest single-day move 36% on 2004-08-02 (real event or data error; kept)",
+    "18 overnight gaps above 8% (contract rolls in unadjusted continuous futures or real events)",
+    "80 calendar gaps longer than 6 days (missing data or non-trading periods)"
+   ],
+   "first_bar": "2000-09-15",
+   "flat_bar_share": 0.016451441712365115,
+   "gap_p999_pct": 10.40664208889776,
+   "glitch_bars_removed": [],
+   "last_bar": "2026-10-30",
+   "max_overnight_gap_pct": 37.09419904204364,
+   "median_daily_range_pct": 1.5367103016505406,
+   "quality_status_after_cleaning": "warn",
+   "symbol": "ZS=F",
+   "usable": true,
+   "usable_from": "2001-01-02"
+  },
+  "SP500": {
+   "bars_downloaded": 6585,
+   "bars_usable": 6511,
+   "daily_vol_pct": 1.1985605441978429,
+   "findings": [
+    "1 overnight gaps above 8% (contract rolls in unadjusted continuous futures or real events)",
+    "1 provider glitch bars (spike-and-revert or contradicting open); a study uses the cleaned view"
+   ],
+   "first_bar": "2000-09-18",
+   "flat_bar_share": 0.0,
+   "gap_p999_pct": 3.335130234170019,
+   "glitch_bars_removed": [
+    {
+     "date": "2011-08-08",
+     "reason": "spike_reversal"
+    }
+   ],
+   "last_bar": "2026-10-30",
+   "max_overnight_gap_pct": 8.930753419348713,
+   "median_daily_range_pct": 1.2229210342417889,
+   "quality_status_after_cleaning": "warn",
+   "symbol": "ES=F",
+   "usable": true,
+   "usable_from": "2001-01-02"
+  },
+  "US10Y_FUT": {
+   "bars_downloaded": 6537,
+   "bars_usable": 6468,
+   "daily_vol_pct": 0.38629250213981303,
+   "findings": [
+    "1 calendar gaps longer than 6 days (missing data or non-trading periods)"
+   ],
+   "first_bar": "2000-09-21",
+   "flat_bar_share": 0.0010822510822510823,
+   "gap_p999_pct": 1.3941573467456165,
+   "glitch_bars_removed": [],
+   "last_bar": "2026-10-30",
+   "max_overnight_gap_pct": 2.3101913127180795,
+   "median_daily_range_pct": 0.4656495431858033,
+   "quality_status_after_cleaning": "warn",
+   "symbol": "ZN=F",
+   "usable": true,
+   "usable_from": "2001-01-02"
+  },
+  "USDCAD": {
+   "bars_downloaded": 5899,
+   "bars_usable": 5823,
+   "daily_vol_pct": 0.5357184289318739,
+   "findings": [],
+   "first_bar": "2003-09-16",
+   "flat_bar_share": 0.0006869311351537008,
+   "gap_p999_pct": 2.0741307716231936,
+   "glitch_bars_removed": [],
+   "last_bar": "2026-10-31",
+   "max_overnight_gap_pct": 3.491322967266286,
+   "median_daily_range_pct": 0.5932781078145379,
+   "quality_status_after_cleaning": "pass",
+   "symbol": "CAD=X",
+   "usable": true,
+   "usable_from": "2004-01-01"
+  },
+  "USDJPY": {
+   "bars_downloaded": 7502,
+   "bars_usable": 7459,
+   "daily_vol_pct": 0.6607919087483239,
+   "findings": [
+    "3 calendar gaps longer than 6 days (missing data or non-trading periods)"
+   ],
+   "first_bar": "1996-10-30",
+   "flat_bar_share": 0.0010725298297358896,
+   "gap_p999_pct": 3.1775753401372966,
+   "glitch_bars_removed": [
+    {
+     "date": "2008-04-07",
+     "reason": "spike_reversal"
+    },
+    {
+     "date": "2008-10-07",
+     "reason": "spike_reversal"
+    },
+    {
+     "date": "2008-12-08",
+     "reason": "spike_reversal"
+    }
+   ],
+   "last_bar": "2026-10-30",
+   "max_overnight_gap_pct": 4.045439539319007,
+   "median_daily_range_pct": 0.7257633140038879,
+   "quality_status_after_cleaning": "warn",
+   "symbol": "JPY=X",
+   "usable": true,
+   "usable_from": "1997-01-01"
+  }
+ }
+}

@@ -1,0 +1,25 @@
+{
+  "id": "COPPER",
+  "symbol": "HG=F",
+  "name": "Copper (COMEX continuous futures proxy)",
+  "asset_class": "commodity_future",
+  "quote_currency": "USD",
+  "tick_size": 0.0005,
+  "min_quantity": 0.01,
+  "quantity_step": 0.01,
+  "costs": {
+    "fee_bps": 1.0,
+    "spread_bps": 4.0,
+    "slippage_bps": 3.0
+  },
+  "max_leverage": 3.0,
+  "broker_max_leverage_assumed": 10.0,
+  "maintenance_margin_fraction": 0.05,
+  "gap_stress_pct": 22.0,
+  "min_stop_pct": 0.3,
+  "trading_hours_per_day": 23.0,
+  "trading_days_per_year": 252,
+  "timezone": "America/New_York",
+  "sessions": "Sun 18:00 - Fri 17:00 ET, daily 1h break",
+  "notes": "Continuous futures series from the free provider: contract-roll gaps are not adjusted. Broker terms unverified. gap_stress_pct = 1.25 x the worst overnight gap 17.5% in the cleaned usable history (floor per asset class, capped at 25 % because unadjusted contract rolls inflate the historical maximum); min_stop_pct = 25 % of the median daily range 1.23%."
+}

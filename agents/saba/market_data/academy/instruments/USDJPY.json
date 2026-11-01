@@ -1,0 +1,25 @@
+{
+  "id": "USDJPY",
+  "symbol": "JPY=X",
+  "name": "USD/JPY spot FX",
+  "asset_class": "fx",
+  "quote_currency": "JPY",
+  "tick_size": 0.001,
+  "min_quantity": 1.0,
+  "quantity_step": 1.0,
+  "costs": {
+    "fee_bps": 0.0,
+    "spread_bps": 0.8,
+    "slippage_bps": 0.5
+  },
+  "max_leverage": 10.0,
+  "broker_max_leverage_assumed": 30.0,
+  "maintenance_margin_fraction": 0.02,
+  "gap_stress_pct": 5.5,
+  "min_stop_pct": 0.2,
+  "trading_hours_per_day": 24.0,
+  "trading_days_per_year": 260,
+  "timezone": "UTC",
+  "sessions": "Sun ~22:00 UTC - Fri ~22:00 UTC, continuous",
+  "notes": "Quote currency JPY; account-currency conversion is not modelled (capital is treated as quote-currency units). No real volume. Broker terms unverified. gap_stress_pct = 1.25 x the worst overnight gap 4.0% in the cleaned usable history (floor per asset class, capped at 25 % because unadjusted contract rolls inflate the historical maximum); min_stop_pct = 25 % of the median daily range 0.73%."
+}
