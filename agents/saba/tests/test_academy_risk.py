@@ -43,7 +43,8 @@ if pd is not None:
 class InstrumentTests(unittest.TestCase):
     def test_three_instruments_available_and_consistent(self):
         specs = available_instruments()
-        self.assertEqual(set(specs), {"GOLD", "EURUSD", "SP500"})
+        self.assertTrue({"GOLD", "EURUSD", "SP500"} <= set(specs))   # originals stay; breadth adds more
+        self.assertEqual(len(specs), 16)
         self.assertEqual([specs[k].symbol for k in ("GOLD", "EURUSD", "SP500")], ["GC=F", "EURUSD=X", "ES=F"])
         for s in specs.values():
             self.assertLessEqual(s.max_leverage, s.broker_max_leverage_assumed)   # never above assumed broker cap
