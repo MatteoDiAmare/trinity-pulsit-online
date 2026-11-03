@@ -387,6 +387,12 @@
   fails **closed** via a sentinel — never a `None` default, which is the
   privileged JWT value. See `architecture.md` Invariant #8.
 - **`ops` scope — read-only, route-fenced, self-authorizing**:
+  - **Opt-in per-agent transcript read (`OPS_LOG_READ_AGENTS`)**: the base fence does **not** include
+    `GET /api/agents/{name}/executions/{id}/log` (the full transcript of a run). An operator who needs an unattended, bounded
+    credential to archive ONE agent's transcripts before the retention window removes them names that agent in the
+    `OPS_LOG_READ_AGENTS` environment variable (comma-separated). Default-off and fail-closed (unset, empty or malformed names
+    add nothing), read once at import (never a request-time settings/DB/Redis lookup), per agent (the escaped name is part of
+    the pattern, so no other agent's transcript is reachable), GET only. Changing it needs a backend restart.
   - Admin-minted and **human-only** to mint (`reject_non_interactive_principal` —
     the allowlist form; the guards used for `portal_delegate` are both no-ops for
     an ops principal, so an ops key could otherwise mint ops keys).

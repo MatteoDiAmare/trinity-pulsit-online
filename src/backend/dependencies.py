@@ -2,6 +2,7 @@
 FastAPI dependencies for the Trinity backend.
 """
 import logging
+import os
 import re
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -945,6 +946,45 @@ _OPS_ALLOWED_ROUTES = (
     ("GET", re.compile(r"^/api/subscriptions$")),
     ("GET", re.compile(r"^/api/subscriptions/[^/]+/usage$")),
 )
+
+
+# --------------------------------------------------------------------------- #
+# Opt-in: an `ops` key may read the FINISHED execution transcript of NAMED agents.
+# --------------------------------------------------------------------------- #
+# `GET /api/agents/{name}/executions/{id}/log` returns the full transcript of a
+# run (the agent's reasoning, every tool call and result). It is deliberately not
+# in the base allowlist above: a transcript is more sensitive than fleet health.
+# An operator who needs an unattended, bounded credential to ARCHIVE one agent's
+# transcripts before the retention window removes them (instead of re-logging in
+# every 7 days with an admin JWT) can name that agent in `OPS_LOG_READ_AGENTS`.
+#
+#   * DEFAULT-OFF and FAIL-CLOSED: unset, empty or malformed = no log route. An
+#     invalid name is dropped with a warning, never widened to a wildcard.
+#   * Read ONCE at import from the process environment, so — like the rest of
+#     this fence — membership is never a settings/DB/Redis lookup that could fail
+#     open at request time. Changing it needs a backend restart, by design.
+#   * Per agent: the pattern embeds the escaped name, so a key can read `saba`'s
+#     transcripts and nobody else's. GET only (the belt in the tests asserts it).
+OPS_LOG_READ_AGENTS_ENV = "OPS_LOG_READ_AGENTS"
+_OPS_LOG_AGENT_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,62}$")
+
+
+def _ops_log_read_routes(raw: Optional[str]) -> tuple:
+    """Allowlist entries for finished-execution logs of the agents named in `raw` (comma separated)."""
+    names = []
+    for part in (raw or "").split(","):
+        name = part.strip()
+        if not name:
+            continue
+        if not _OPS_LOG_AGENT_NAME_RE.fullmatch(name):
+            logger.warning("%s: ignoring invalid agent name %r (ops log read stays closed for it)", OPS_LOG_READ_AGENTS_ENV, name[:64])
+            continue
+        if name not in names:
+            names.append(name)
+    return tuple(("GET", re.compile(rf"^/api/agents/{re.escape(n)}/executions/[^/]+/log$")) for n in names)
+
+
+_OPS_ALLOWED_ROUTES = _OPS_ALLOWED_ROUTES + _ops_log_read_routes(os.environ.get(OPS_LOG_READ_AGENTS_ENV))
 
 
 # Scopes that may open the fleet-wide event stream (`/ws/events`). ALLOWlist.

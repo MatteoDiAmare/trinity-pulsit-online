@@ -63,6 +63,10 @@ route set was derived from the **measured** read set of the real consumer; the
 issue's own wording named only `/api/ops/*`, which would have shipped a
 credential unable to run the dashboard it exists for.
 
+**Archiving one agent's transcripts with an `ops` key.** Set `OPS_LOG_READ_AGENTS=<agent>` in the backend environment (restart required),
+mint an `ops` key (admin, interactive login), and the key can additionally `GET /api/agents/<agent>/executions/{id}/log` for that agent only.
+Unset = unchanged behaviour. Revoke with `POST /api/mcp/keys/{id}/revoke`.
+
 The keys page badges the scope, because an unbadged ops key is visually identical
 to an unbounded personal one on the page where credentials are audited.
 
