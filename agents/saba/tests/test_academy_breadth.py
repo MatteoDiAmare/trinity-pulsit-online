@@ -152,7 +152,8 @@ class SpecFileTests(unittest.TestCase):
             self.assertLessEqual(s.gap_stress_pct, 25.0 if iid not in ("GOLD", "EURUSD", "SP500") else 25.0, iid)
             self.assertIn("unverified", (s.notes or "").lower(), iid)
             self.assertEqual(s, load_instrument(iid))
-        self.assertEqual(len([i for i in specs if i not in ("GOLD", "EURUSD", "SP500")]), 13)
+        daily = [i for i in specs if not i.endswith("_BITSTAMP")]           # *_BITSTAMP = intraday-only source specs (no daily history profile)
+        self.assertEqual(len([i for i in daily if i not in ("GOLD", "EURUSD", "SP500")]), 13)
 
     def test_original_three_specs_are_untouched(self):
         # economics of the original instruments are what all earlier results were produced with
@@ -167,7 +168,7 @@ class SpecFileTests(unittest.TestCase):
 
     def test_profiles_cover_every_spec_and_state_the_facts(self):
         prof = load_profiles()
-        for iid in available_instruments():
+        for iid in (i for i in available_instruments() if not i.endswith("_BITSTAMP")):
             self.assertIn(iid, prof, iid)
             self.assertTrue(prof[iid]["usable"], iid)
             self.assertGreater(prof[iid]["bars_usable"], 2000, iid)

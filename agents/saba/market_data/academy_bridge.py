@@ -31,6 +31,7 @@ from .academy.experiments import run_final_test
 from .academy.audit import AuditLog
 from .academy.instruments import available_instruments, load_instrument
 from .academy.ledger import LedgerStore, jsonable
+from .academy.sessions import is_intraday
 from .academy.memory import ResearchMemory
 from .academy.orchestrator import CycleDenied, Orchestrator, mutate_spec
 from .academy.spec_strategy import validate_spec
@@ -60,7 +61,8 @@ USAGE = {
     "halt": {"command": "halt", "reason": "text"},
     "run_study": {"command": "run_study", "cycle_id": 1, "study": {"name": "sma grid", "strategy": "sma_cross", "base_params": {"stop_loss_pct": 2.0},
                   "grid": {"short": [5, 10, 20], "long": [40, 80, 150]}, "instruments": ["GOLD", "EURUSD", "SP500"], "interval": "1d",
-                  "train_bars": 750, "test_bars": 125, "code_file": "optional: your own strategy file instead of strategy/base_params (grid paths then start with params.)"},
+                  "train_bars": 750, "test_bars": 125, "code_file": "optional: your own strategy file instead of strategy/base_params (grid paths then start with params.)",
+                  "intraday (60m etc.)": "interval '60m', fold_mode 'days', train_days 180, test_days 30; allow_overnight false by default (Saba's intraday-only policy); cost_multiplier 2 = double costs"},
                   "workers": 2, "hypothesis_id": "optional: link the study to this hypothesis (no extra trials are charged to it)"},
     "freeze_candidate": {"command": "freeze_candidate", "label": "sma 10/40 on 3 markets", "strategy": "sma_cross", "params": {"short": 10, "long": 40, "stop_loss_pct": 2.0},
                          "instruments": ["GOLD", "EURUSD", "SP500"], "interval": "1d",
@@ -210,7 +212,7 @@ def _refresh_data(archive, study_archive) -> dict:
     return {"refreshed": out, "source": "Yahoo Finance via yfinance (free, daily)"}
 
 
-def handle(req: dict, *, root, strategies_dir, owner_id="local", org_id="personal", extended_root=None) -> dict:
+def handle(req: dict, *, root, strategies_dir, owner_id="local", org_id="personal", extended_root=None, intraday_root=None) -> dict:
     if not isinstance(req, dict) or req.get("command") not in COMMANDS:
         raise ValueError(f"command must be one of {COMMANDS}")
     cmd = req["command"]
@@ -223,6 +225,9 @@ def handle(req: dict, *, root, strategies_dir, owner_id="local", org_id="persona
     # forward candidates keep reproducing exactly. Both are refreshed by `refresh_data`.
     ext = Path(extended_root).expanduser() if extended_root else Path(archive.root).parent / "market_data_extended"
     study_archive = MarketArchive(ext) if ext.is_dir() else archive
+    # Intraday studies read their OWN archive (never the daily ones, so no earlier experiment, split or forward candidate can change).
+    intra = Path(intraday_root).expanduser() if intraday_root else Path(archive.root).parent / "market_data_intraday"
+    intraday_archive = MarketArchive(intra) if intra.is_dir() else None
     ledger = LedgerStore(archive.root, owner_id, org_id)
     orch = Orchestrator(archive.root, registry, archive, memory, ledger)
     sdir = Path(strategies_dir)
@@ -246,10 +251,16 @@ def handle(req: dict, *, root, strategies_dir, owner_id="local", org_id="persona
                 if hyp["status"] not in ("open", "testing"):
                     raise ValueError(f"hypothesis {hid} is {hyp['status']}; register a new (child) hypothesis instead")
             # the cycle budget is charged once, and only when the study is really computed: an identical study is returned from the registry
-            out = run_recorded_study(registry, study_archive, spec, workers=min(max(int(req.get("workers", 1)), 1), 2),
+            if is_intraday(spec.interval):
+                if intraday_archive is None:
+                    raise ValueError("no intraday archive is installed (market_data_intraday); intraday studies need one")
+                use = intraday_archive
+            else:
+                use = study_archive
+            out = run_recorded_study(registry, use, spec, workers=min(max(int(req.get("workers", 1)), 1), 2),
                                      before_run=lambda: orch.charge(cycle_id, 1))
             out["cell_table"] = sorted([c for c in out["cell_table"] if c.get("valid")], key=lambda c: -(c.get("oos_sharpe_annualized") or -9))[:8]
-            out["data_archive"] = "extended" if study_archive is not archive else "standard"
+            out["data_archive"] = "intraday" if use is intraday_archive else ("extended" if study_archive is not archive else "standard")
             if hid is not None:
                 # evidence link only (idempotent). The study's cells are counted once, in the global trial index; the hypothesis' own
                 # trial budget is deliberately NOT charged, so nothing is counted twice.
@@ -261,6 +272,8 @@ def handle(req: dict, *, root, strategies_dir, owner_id="local", org_id="persona
             return {"ok": True, **out}
         if cmd == "freeze_candidate":
             from .academy.forward import ForwardTracker
+            if is_intraday(str(req.get("interval", "1d"))):
+                raise ValueError("forward tracking of intraday plans is not implemented yet (frozen candidates are daily); keep the intraday result as a lesson")
             item = _experiment({"label": _str(req, "label", maxlen=120), **{k: req[k] for k in ("strategy", "params", "spec", "spec_file", "code", "code_file", "seed", "limits") if k in req}}, sdir)
             purpose, study_sha, note = _freeze_purpose(registry, req, item)
             tr = ForwardTracker(Path(archive.root) / "academy_memory.sqlite3")
@@ -313,7 +326,8 @@ def handle(req: dict, *, root, strategies_dir, owner_id="local", org_id="persona
             return out
         if cmd == "status":
             return {"ok": True, **orch.status(), "test_windows_consumed_until": orch.test_windows(), "instruments": sorted(available_instruments()),
-                    "study_data": "extended (long history)" if study_archive is not archive else "standard"}
+                    "study_data": "extended (long history)" if study_archive is not archive else "standard",
+                    "intraday_data": "installed" if intraday_archive is not None else "not installed"}
         if cmd == "start_cycle":
             started = orch.start_cycle()
             status = {**orch.status(), "test_windows_consumed_until": orch.test_windows()}
@@ -418,6 +432,7 @@ def main(argv=None) -> int:
     p.add_argument("--owner-id", default="local")
     p.add_argument("--org-id", default="personal")
     p.add_argument("--extended-root", default=None, help="Long-history archive used by studies (default: <root>/../market_data_extended if it exists)")
+    p.add_argument("--intraday-root", default=None, help="Intraday archive used by intraday studies (default: <root>/../market_data_intraday if it exists)")
     args = p.parse_args(argv)
     started = time.monotonic()
     request, req_cmd, rc = None, None, 1
@@ -426,7 +441,7 @@ def main(argv=None) -> int:
         req_cmd = request.get("command") if isinstance(request, dict) else None
         with contextlib.redirect_stderr(io.StringIO()):         # library warnings (yfinance / pandas) must not reach the caller; errors travel in the JSON reply
             out = handle(request, root=args.root, strategies_dir=args.strategies_dir, owner_id=args.owner_id, org_id=args.org_id,
-                         extended_root=args.extended_root)
+                         extended_root=args.extended_root, intraday_root=args.intraday_root)
         reply, rc = jsonable(out), 0
         print(json.dumps(reply, allow_nan=False))
     except (ValueError, TypeError, KeyError, OSError, CycleDenied, json.JSONDecodeError, FileNotFoundError) as exc:

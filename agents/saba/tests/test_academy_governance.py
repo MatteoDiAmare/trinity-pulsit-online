@@ -165,6 +165,43 @@ class StudyLinkTests(Gov):
         self.assertEqual(self.call({"command": "status"}, extended_root=Path(self.tmp.name + "_none"))["study_data"], "standard")
 
 
+class IntradayBridgeTests(Gov):
+    def start(self):
+        return self.call({"command": "start_cycle"})["cycle_id"]
+
+    def test_intraday_study_uses_only_the_intraday_archive_and_is_refused_without_it(self):
+        import numpy as np
+        from market_data.academy.sessions import expected_index
+        idx = expected_index("24x7", "2023-01-01", "2023-11-30", "60m")
+        r = np.random.default_rng(1).normal(0, 0.003, len(idx))
+        close = 100 * np.cumprod(1 + r)
+        op = np.concatenate([[100.0], close[:-1]])
+        df = pd.DataFrame({"Open": op, "High": np.maximum(op, close) * 1.002, "Low": np.minimum(op, close) * 0.998, "Close": close, "Volume": 10.0,
+                           "Dividends": 0.0, "Stock Splits": 0.0}, index=idx)
+        intra = Path(self.tmp.name + "_intra")
+        d = intra / "BTCUSD-BITSTAMP" / "60m"
+        d.mkdir(parents=True)
+        df.to_parquet(d / "bars.parquet")
+        study = {"name": "hourly", "strategy": "sma_cross", "base_params": {"stop_loss_pct": 1.5}, "grid": {"short": [6, 12], "long": [24, 48]},
+                 "instruments": ["BTCUSD_BITSTAMP"], "interval": "60m", "fold_mode": "days", "train_days": 40, "test_days": 10, "respect_usable_from": False}
+        cyc = self.start()
+        with self.assertRaisesRegex(ValueError, "no intraday archive"):
+            self.call({"command": "run_study", "cycle_id": cyc, "study": study}, intraday_root=Path(self.tmp.name + "_missing"))
+        self.assertEqual(self.mem.db.execute("SELECT experiments_run FROM cycles WHERE id=?", (cyc,)).fetchone()[0], 0)       # nothing charged
+        self.assertEqual(self.call({"command": "status"}, intraday_root=intra)["intraday_data"], "installed")
+        out = self.call({"command": "run_study", "cycle_id": cyc, "study": study}, intraday_root=intra)
+        self.assertEqual(out["data_archive"], "intraday")
+        self.assertFalse(out["intraday"]["allow_overnight"])
+        self.assertEqual(out["wfo"]["trades_held_overnight"], 0)
+        # a daily study never reads the intraday archive; the daily registry keys (market + interval) stay separate
+        daily = {**study, "interval": "1d", "fold_mode": "dates", "train_days": None, "test_days": None, "train_bars": 250, "test_bars": 100, "instruments": ["GOLD", "EURUSD"],
+                 "name": "daily"}
+        self.assertEqual(self.call({"command": "run_study", "cycle_id": cyc, "study": daily}, intraday_root=intra)["data_archive"], "standard")
+        with self.assertRaisesRegex(ValueError, "not implemented yet"):
+            self.call({"command": "freeze_candidate", "label": "x", "strategy": "sma_cross", "params": {"short": 6, "long": 24, "stop_loss_pct": 1.5},
+                       "instruments": ["BTCUSD_BITSTAMP"], "interval": "60m", "forecast": FORECAST})
+
+
 class CandidateVsCalibrationTests(Gov):
     PLAN = {"command": "freeze_candidate", "label": "sma", "strategy": "sma_cross", "params": {"short": 5, "long": 40, "stop_loss_pct": 2.0},
             "instruments": ["GOLD"], "interval": "1d", "forecast": FORECAST, "rules": {"min_trades": 10, "min_days": 20}}

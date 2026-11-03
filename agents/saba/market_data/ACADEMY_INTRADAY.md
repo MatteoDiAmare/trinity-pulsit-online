@@ -1,7 +1,7 @@
 # Academy – kostnadsfri intradagsdata: kartläggning och genomförandeplan
 
-Status 2026-11-03: **teknisk kartläggning och plan.** Ingen intradagsdata är installerad i Sabas miljö och ingen kod är ändrad. Mätningarna nedan gjordes mot
-live-källorna den 3 november 2026 och mot Academys befintliga kod i ett separat arbetsarkiv.
+Status 2026-11-03: kartläggning (avsnitt 1–4) **och en begränsad implementation (avsnitt 5)**. Implementationen ligger på grenen `feature/saba-foundation-bezier`;
+**den är inte installerad i Sabas miljö** och ingen intradagsdata finns där. Mätningarna gjordes mot live-källorna den 3 november 2026.
 
 ## 1. Datakällor (mätt eller läst)
 | Källa | Instrument | Intervall och djup (mätt) | Kvalitet / begränsningar | Villkor |
@@ -58,3 +58,46 @@ Ingen gratis, licensren källa ger historiska bid/ask för guld/FX. Därför en 
 **Oförändrat:** forskningshistorik, riskgränser, cykelbudget, avstängd livehandel. Portföljstrategier och praktiska uppdrag byggs inte.
 
 **Uppskattad omfattning:** steg 1–3 är ca 4 mindre kodändringar med tester (inga nya tunga beroenden); steg 4 en studiekörning. Inget installeras i Sabas container före din granskning.
+
+
+## 5. Genomfört (begränsad implementation) och verifiering
+Alla tillägg är valfria och av som standard: **dagsstudier, deras sparade specifikationer och hashar är oförändrade** (bevisat med test: samma `sha256` före och efter).
+Intradagsdata ligger i ett *separat* arkiv (`market_data_intraday`); dagsarkiven läses aldrig av intradagsstudier och tvärtom.
+
+| Område | Vad som gjorts |
+|---|---|
+| Kalenderfönster | `fold_mode: "days"` med `train_days/test_days/step_days` i kalenderdagar på en gemensam kalender, avbildat på staplar via tidsstämpel (inget framtidsläckage mellan marknader). Intradag med dagsläge avvisas med tydligt fel. |
+| Poolning | Avkastning poolas per tidsstämpel (inte datum) för intradag; dagsstudier oförändrade. |
+| Annualisering | Empirisk: staplar per år mäts från data (24/7 ≈ 8 760, 23 h/5 d ≈ 5 800, regular hours ≈ 1 500) i stället för instrumentets öppettider. |
+| Marknadssessioner | `sessions.py`: 24/7, 24/5 (FX), Globex med daglig paus (guld), regular hours (index), sommartid hanterad. Kvalitetskontroll mot kalendern: komplett­het, hål, staplar utanför session, kantmarginal ±60 min (leverantörer och handelsplats skiljer upp till en timme kring sommartid). Helgdagar modelleras inte. |
+| Sabas intradagspolicy | `SessionRules` återanvänder `IntradayPolicy` (inga nyinträden från 21:30, flat före 21:45 Europe/Stockholm). Position stängs vid stängningen av den sista stapeln före gränsen; även marknader med begränsade tider (där nästa stapel är morgondagen) kan inte hålla över natten. Dagliga förlustgränser nollställs vid lokal midnatt. **Övernattshållning kräver `allow_overnight: true`**, som då står uttryckligen i studiens sparade spec. Resultatet redovisar `trades_held_overnight` och `exit_reasons`. |
+| Kostnader | Tidsprofil för spread (UTC-timme, helg), slippage = bas + andel av *föregående* stapels intervall (ingen framtidsinformation), finansiering per passerad rullning (lång/kort, trippel onsdag, ingen helgdebitering för FX/guld, daglig för krypto). Profiler i `data/intraday_profiles.json`, alla markerade som **antaganden**. `cost_multiplier: 2` = dubbla kostnader. |
+| Data | `bitstamp.py`: paginerad, 4 anrop/s, backoff, aldrig halvfärdig stapel, korrekt källa i arkivets metadata. Instrument `BTCUSD_BITSTAMP`. |
+| Felsäkerhet | En studie där *alla* celler kraschar avbryts nu med fel (tidigare registrerades den tyst som `no_evidence`). |
+
+**Verifiering mot verkliga data (Bitstamp BTC/USD, 60 min, 2019-01-01 → 2026-11-03, 68 726 staplar, 69 anrop):** kvalitetskontroll pass, sessionskontroll 24/7 pass
+(100 % av förväntade staplar, 8 760 per år, inga glitchar, 0,01 % nollvolym). Walk-forward över 70 folds / 5,75 OOS-år, tre strategifamiljer, med och utan policy, normala och dubbla kostnader – se rapporten.
+Kalendrarna för 24/5 och Globex kontrollerades mot ett manuellt hämtat Yahoo-stickprov (lokalt, inte arkiverat): guld 95,6 % komplett (helgdagar), EURUSD 98,7 % med 292 kantstaplar toleredade, BTC 98,9 % med ett verkligt datahål på 100 timmar.
+Fel som testerna hittade och som rättades: dygnsavdrift över sommartidsbyte i sessionskalendern, datumkonvertering i policyn, att en marknad med begränsade tider kunde bära en position över natten, tyst registrering av helt kraschade studier.
+
+## 6. Rättigheter, konton och villkor
+- **Bitstamp:** dokumentationen kräver licens (Data License Agreement) för *företags kommersiella* bruk av börsdata och säger inget om privat forskningsbruk; användarvillkoren själva kunde jag inte hämta. Hämtningen är liten (≈70 anrop), gentle (4/s) och arkivet är privat. **Din bedömning behövs** om Saba/Heidis konto räknas som kommersiellt.
+- **OANDA demo:** v20-API:t finns för alla OANDA-enheter utom *OANDA Global Markets* och *OANDA TMS Brokers S.A.*; historik från 2005; 120 anrop/s och högst 2 nya anslutningar/s per IP; token skapas i kontoportalen under "Manage API Access" efter att du godkänt API-licensen (licenstexten kunde jag inte läsa). **Inte verifierat:** vilken OANDA-enhet som betjänar Sverige, om XAU_USD finns för ditt konto, exakt historikdjup för M1/H1 och om licensen tillåter lagring av historik för forskning. Inget konto och ingen integration har skapats.
+  Det du behöver göra: (1) öppna ett demokonto; (2) läs API-licensen och villkoren för lagring/användning av prisdata; (3) skapa token och lägg den i en fil med mode 600 (skript medföljer när du säger till); (4) då verifierar jag instrumentlista, första tillgängliga M1/H1-stapel för XAU_USD/EUR_USD och kvalitet, före någon integration.
+- **Yahoo:** ingen automatiserad insamling är uppsatt. Stickprov hämtades manuellt för forskning (personligt bruk).
+- **Dukascopy:** ingen insamling; kräver skriftligt medgivande.
+
+### Resultat: BTC/USD (Bitstamp), 60 min, walk-forward 180 dagar träning / 30 dagar test, 70 folds, 5,75 OOS-år, tom registry per körning
+| Familj | Variant | Affärer | Sharpe | Avkastning | Kostnader betalda | Finansiering | Hållna över natten | Verdict |
+|---|---|---|---|---|---|---|---|---|
+| SMA | policy ×1 | 3 912 | −5,8 | −99,7 % | 5 177 | 156 | **0** | no_evidence |
+| SMA | policy ×2 (dubbla kostnader) | 3 909 | −9,0 | −100 % | 8 113 | 147 | 0 | no_evidence |
+| SMA | **övernatt tillåten** ×1 | 1 190 | −1,6 | −81,5 % | 1 692 | 164 | **632** | no_evidence |
+| SMA | övernatt tillåten ×2 | 1 264 | −2,9 | −95,3 % | 2 859 | 161 | 635 | no_evidence |
+| Breakout | policy ×1 / ×2 | 771 / 837 | −2,4 / −3,9 | −73,5 % / −89,8 % | 1 216 / 2 141 | 6 / 7 | 0 / 0 | no_evidence |
+| Mean-reversion | policy ×1 / ×2 | 1 800 / 2 056 | −5,6 / −9,0 | −97,4 % / −99,8 % | 2 767 / 5 007 | 33 / 35 | 0 / 0 | no_evidence |
+Buy&hold samma period: Sharpe 0,84. Alla nio kombinationer: ingen edge; kostnaderna äter allt (kostnader betalda är i kontovaluta på ett konto om 1 000 per fold-kedja, summerade).
+**Policybeviset:** med policy 0 affärer hållna över natten och `policy_flatten` som dominerande utgång; när övernattshållning tillåts uttryckligen hålls 632 av 1 190 affärer över natten, och studiens spec säger `allow_overnight: true`.
+**Kostnadskänslighet:** dubbla kostnader försämrar varje resultat monotont (t.ex. SMA −5,8 → −9,0 Sharpe).
+**Statistisk styrka:** en marknad × 5,75 OOS-år × 9 försök kan bara upptäcka en sann årlig Sharpe på ≈3,6 (80 % styrka; luck-tröskel 0,76). Det är ett test av *metoden*, inte ett fynd om BTC: enkla timregler med antagna kostnader (≈45 bps tur och retur) är kostnadsdödade, och kostnadsantagandena är obekräftade.
+Reproduktion: `integration/run_intraday_experiments.py`, `integration/analyze_intraday.py`.

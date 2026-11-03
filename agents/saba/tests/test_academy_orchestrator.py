@@ -306,7 +306,7 @@ class BridgeTests(Base):
         st = self.call({"command": "status"})
         self.assertEqual(st["budget"]["max_experiments_per_cycle"], 20)
         self.assertTrue({"EURUSD", "GOLD", "SP500"} <= set(st["instruments"]))
-        self.assertEqual(len(st["instruments"]), 16)
+        self.assertEqual(len(st["instruments"]), 17)
         reg = self.call({"command": "register_hypothesis", "statement": "Trend rules transfer between gold and EUR/USD", "family": "trend",
                          "trial_budget": 6, "instruments": ["GOLD", "EURUSD"], "interval": "1d",
                          "experiments": [{"label": "sma", "strategy": "sma_cross", "params": {"short": 6, "long": 25}},
