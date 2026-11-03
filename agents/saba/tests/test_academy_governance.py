@@ -374,6 +374,25 @@ class CompletedBarsTests(Gov):
         self.assertNotIn("Pandas4Warning", err.getvalue())
 
 
+class RejectedBarsTests(Gov):
+    def test_malformed_provider_bars_are_reported_not_hidden(self):
+        idx = pd.to_datetime(["2027-03-01", "2027-03-02", "2027-03-03"], utc=True)
+        frame = pd.DataFrame({"Open": [1.0, 1.1, 1.1157], "High": [1.2, 1.2, 1.1237], "Low": [0.9, 1.0, 1.1157], "Close": [1.1, 1.15, 1.1156],
+                              "Volume": [0.0] * 3}, index=idx)            # last bar: Low above Close, as Yahoo delivered for EURUSD on 2026-11-02
+
+        class T:
+            def history(self, **kw):
+                return frame
+        from market_data.archive import completed_bars_provider
+        prov = completed_bars_provider(now=pd.Timestamp("2027-03-04 12:00", tz="UTC"), factory=lambda s: T())
+        a = MarketArchive(self.root)
+        with mock.patch.object(academy_bridge, "completed_bars_provider", lambda: prov):
+            out = academy_bridge._refresh_data(a, a)
+        e = out["refreshed"]["EURUSD"]["standard"]
+        self.assertEqual(e["rejected_bars"], ["2027-03-03"])
+        self.assertEqual(e["last_bar"], "2027-03-02")
+
+
 class RefreshTests(Gov):
     def test_refresh_appends_to_each_archive_that_holds_the_instrument_and_survives_errors(self):
         calls = []

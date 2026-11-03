@@ -193,14 +193,17 @@ def _refresh_data(archive, study_archive) -> dict:
     """Append the latest COMPLETED daily bars (Yahoo Finance, free; the forming current day is left out) to the archives that already hold each
     instrument. Never replaces history."""
     out = {}
+    provider = completed_bars_provider()
     for iid, spec in sorted(available_instruments().items()):
         entry = {}
         for label, arc in (("standard", archive), ("extended", study_archive if study_archive is not archive else None)):
             if arc is None or not _has_data(arc, iid, "1d"):
                 continue
             try:
-                info = arc.ingest(spec.symbol, "1d", period="1mo", provider=completed_bars_provider())
-                entry[label] = {"last_bar": info["last_timestamp_utc"][:10], "bars": info["row_count"]}
+                info = arc.ingest(spec.symbol, "1d", period="1mo", provider=provider)
+                kept = {str(d.date()) for d in arc.read(spec.symbol, "1d").index}
+                rejected = sorted(set(provider.seen.get(spec.symbol, [])) - kept)          # malformed provider bars (e.g. Low above Close) are not archived
+                entry[label] = {"last_bar": info["last_timestamp_utc"][:10], "bars": info["row_count"], **({"rejected_bars": rejected} if rejected else {})}
             except Exception as exc:                  # network problems must not fail the call; report them
                 entry[label] = {"error": str(exc)[:160]}
         out[iid] = entry

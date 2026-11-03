@@ -55,6 +55,8 @@ def completed_bars_provider(now=None, factory=None):
 
     A daily bar fetched during its own session is incomplete (open/high/low/close keep changing); archiving it would let a strategy or a
     forward candidate act on a half-finished day. The next refresh replaces nothing it should not: complete days are simply appended."""
+    seen = {}                                   # symbol -> dates the provider delivered (completed days only), for rejection reporting
+
     def make(symbol):
         if factory is None:
             import yfinance as yf
@@ -68,8 +70,11 @@ def completed_bars_provider(now=None, factory=None):
                 if frame is None or frame.empty:
                     return frame
                 today = (now if now is not None else pd.Timestamp.now(tz="UTC")).normalize()
-                return frame.loc[pd.to_datetime(frame.index, utc=True).normalize() < today]
+                out = frame.loc[pd.to_datetime(frame.index, utc=True).normalize() < today]
+                seen[symbol] = [str(d.date()) for d in pd.to_datetime(out.index, utc=True)]
+                return out
         return _Completed()
+    make.seen = seen
     return make
 
 
