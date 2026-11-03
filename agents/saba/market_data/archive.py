@@ -50,6 +50,29 @@ def normalize_frame(frame: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def completed_bars_provider(now=None, factory=None):
+    """Provider for `MarketArchive.ingest` whose history leaves out the current, still forming UTC day.
+
+    A daily bar fetched during its own session is incomplete (open/high/low/close keep changing); archiving it would let a strategy or a
+    forward candidate act on a half-finished day. The next refresh replaces nothing it should not: complete days are simply appended."""
+    def make(symbol):
+        if factory is None:
+            import yfinance as yf
+            ticker = yf.Ticker(symbol)
+        else:
+            ticker = factory(symbol)
+
+        class _Completed:
+            def history(self, *args, **kwargs):
+                frame = ticker.history(*args, **kwargs)
+                if frame is None or frame.empty:
+                    return frame
+                today = (now if now is not None else pd.Timestamp.now(tz="UTC")).normalize()
+                return frame.loc[pd.to_datetime(frame.index, utc=True).normalize() < today]
+        return _Completed()
+    return make
+
+
 class MarketArchive:
     """Local Parquet archive; callers must mount its root as persistent storage."""
 

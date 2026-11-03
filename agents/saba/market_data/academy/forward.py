@@ -22,6 +22,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from ..archive import completed_bars_provider
 from .instruments import load_instrument
 from .integrity import code_version
 from .simulator import SimConfig, Simulator
@@ -178,7 +179,7 @@ class ForwardTracker:
         if fetch:
             for sym, itv in sorted({(load_instrument(i).symbol, c["plan"]["interval"]) for c in cands for i in c["plan"]["instruments"]}):
                 try:
-                    archive.ingest(sym, itv, period="1mo")
+                    archive.ingest(sym, itv, period="1mo", provider=completed_bars_provider() if itv == "1d" else None)
                 except Exception as exc:
                     fetch_errors[sym] = str(exc)[:160]
         out = []

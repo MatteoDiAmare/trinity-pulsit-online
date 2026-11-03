@@ -14,6 +14,8 @@ Exit code 0 on success; 1 with {"ok": false, "error": ...} otherwise.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import logging
 import re
@@ -23,7 +25,7 @@ import warnings
 from pathlib import Path
 
 from memory.experience_store import ExperienceStore
-from .archive import MarketArchive
+from .archive import MarketArchive, completed_bars_provider
 from .laboratory import ExperimentRegistry
 from .academy.experiments import run_final_test
 from .academy.audit import AuditLog
@@ -188,7 +190,8 @@ def _freeze_purpose(registry, req: dict, item: dict):
 
 
 def _refresh_data(archive, study_archive) -> dict:
-    """Append the latest daily bars (Yahoo Finance, free) to the archives that already hold each instrument. Never replaces history."""
+    """Append the latest COMPLETED daily bars (Yahoo Finance, free; the forming current day is left out) to the archives that already hold each
+    instrument. Never replaces history."""
     out = {}
     for iid, spec in sorted(available_instruments().items()):
         entry = {}
@@ -196,7 +199,7 @@ def _refresh_data(archive, study_archive) -> dict:
             if arc is None or not _has_data(arc, iid, "1d"):
                 continue
             try:
-                info = arc.ingest(spec.symbol, "1d", period="1mo")
+                info = arc.ingest(spec.symbol, "1d", period="1mo", provider=completed_bars_provider())
                 entry[label] = {"last_bar": info["last_timestamp_utc"][:10], "bars": info["row_count"]}
             except Exception as exc:                  # network problems must not fail the call; report them
                 entry[label] = {"error": str(exc)[:160]}
@@ -418,7 +421,9 @@ def main(argv=None) -> int:
     try:
         request = json.load(sys.stdin)
         req_cmd = request.get("command") if isinstance(request, dict) else None
-        out = handle(request, root=args.root, strategies_dir=args.strategies_dir, owner_id=args.owner_id, org_id=args.org_id, extended_root=args.extended_root)
+        with contextlib.redirect_stderr(io.StringIO()):         # library warnings (yfinance / pandas) must not reach the caller; errors travel in the JSON reply
+            out = handle(request, root=args.root, strategies_dir=args.strategies_dir, owner_id=args.owner_id, org_id=args.org_id,
+                         extended_root=args.extended_root)
         reply, rc = jsonable(out), 0
         print(json.dumps(reply, allow_nan=False))
     except (ValueError, TypeError, KeyError, OSError, CycleDenied, json.JSONDecodeError, FileNotFoundError) as exc:

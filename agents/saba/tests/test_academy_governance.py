@@ -341,6 +341,39 @@ class CliTests(Gov):
         self.assertEqual(self.mem.lesson(old)["superseded_by"], out["new_lesson_id"])
 
 
+class CompletedBarsTests(Gov):
+    def test_provider_drops_the_forming_day_and_archive_appends_only_complete_days(self):
+        from market_data.archive import completed_bars_provider
+        idx = pd.to_datetime(["2026-10-30 04:00", "2026-11-02 05:00", "2026-11-03 05:00"], utc=True)
+        frame = pd.DataFrame({"Open": [1.0, 1.1, 1.2], "High": [1.2, 1.2, 1.3], "Low": [0.9, 1.0, 1.1], "Close": [1.1, 1.15, 1.25], "Volume": [1.0] * 3,
+                              "Dividends": [0.0] * 3, "Stock Splits": [0.0] * 3}, index=idx)
+
+        class T:
+            def history(self, **kw):
+                return frame
+        prov = completed_bars_provider(now=pd.Timestamp("2026-11-03 12:00", tz="UTC"), factory=lambda s: T())
+        got = prov("X").history(period="1mo", interval="1d")
+        self.assertEqual([str(i.date()) for i in got.index], ["2026-10-30", "2026-11-02"])
+        info = MarketArchive(self.root).ingest("NQ=F", "1d", period="1mo", provider=prov)
+        self.assertEqual(info["last_timestamp_utc"][:10], "2026-11-02")
+
+    def test_stderr_noise_never_reaches_the_reply_channel(self):
+        import sys
+
+        def noisy(*a, **k):
+            print("Pandas4Warning: inplace is deprecated", file=sys.stderr)
+            return {"ok": True}
+        err, out = io.StringIO(), io.StringIO()
+        with mock.patch.object(academy_bridge, "handle", noisy), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            old, sys.stdin = sys.stdin, io.StringIO('{"command": "status"}')
+            try:
+                code = academy_bridge.main(["--root", str(self.root)])
+            finally:
+                sys.stdin = old
+        self.assertEqual((code, json.loads(out.getvalue())), (0, {"ok": True}))
+        self.assertNotIn("Pandas4Warning", err.getvalue())
+
+
 class RefreshTests(Gov):
     def test_refresh_appends_to_each_archive_that_holds_the_instrument_and_survives_errors(self):
         calls = []
