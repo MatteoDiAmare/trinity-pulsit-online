@@ -29,6 +29,7 @@ from .stats import bootstrap_mean_ci, sharpe
 from .strategies import build_strategy
 
 DEFAULT_RULES = {"min_trades": 30, "min_days": 60}
+PURPOSES = ("candidate", "calibration")
 
 
 def _now():
@@ -69,6 +70,10 @@ class ForwardTracker:
           study_sha256 TEXT, note TEXT, status TEXT NOT NULL DEFAULT 'active', code_version TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS forward_log (id INTEGER PRIMARY KEY, frozen_id INTEGER NOT NULL, created_at TEXT NOT NULL, as_of TEXT,
           snapshot_json TEXT NOT NULL);""")
+        # `purpose` is metadata outside the immutable plan hash. Rows that existed before the column was introduced get 'calibration':
+        # no study had yet met the candidate criteria when they were frozen, so none of them may count as a qualified candidate.
+        if "purpose" not in {r[1] for r in self.db.execute("PRAGMA table_info(frozen)")}:
+            self.db.execute("ALTER TABLE frozen ADD COLUMN purpose TEXT NOT NULL DEFAULT 'calibration'")
         self.db.commit()
 
     def close(self):
@@ -76,7 +81,12 @@ class ForwardTracker:
 
     # ---- freezing ------------------------------------------------------
     def freeze(self, archive, *, label: str, strategy: str, params: dict, instruments: list, interval: str = "1d", capital: float = 1000.0,
-               forecast: dict, rules: dict | None = None, study_sha256: str | None = None, note: str = "") -> int:
+               forecast: dict, rules: dict | None = None, study_sha256: str | None = None, note: str = "",
+               purpose: str = "calibration") -> int:
+        """purpose 'candidate': the strategy met the pre-registered candidate criteria of a study (verified by the caller against the registry).
+        purpose 'calibration': followed only to score Saba's forecasts; it never counts as a candidate, whatever its forward result."""
+        if purpose not in PURPOSES:
+            raise ValueError(f"purpose must be one of {PURPOSES}")
         if not label.strip() or not instruments:
             raise ValueError("label and instruments are required")
         forecast = validate_forecast(forecast)
@@ -92,20 +102,20 @@ class ForwardTracker:
         plan = {"strategy": strategy, "params": params, "instruments": list(instruments), "interval": interval, "capital": capital}
         sha = hashlib.sha256(json.dumps({**plan, "cutoffs": cutoffs}, sort_keys=True, default=str).encode()).hexdigest()
         try:
-            cur = self.db.execute("INSERT INTO frozen(created_at,label,plan_json,plan_sha256,cutoffs_json,forecast_json,rules_json,study_sha256,note,code_version) "
-                                  "VALUES (?,?,?,?,?,?,?,?,?,?)", (_now(), label.strip(), json.dumps(plan, sort_keys=True, default=str), sha, json.dumps(cutoffs),
-                                                                   json.dumps(forecast), json.dumps(rules), study_sha256, note, code_version()))
+            cur = self.db.execute("INSERT INTO frozen(created_at,label,plan_json,plan_sha256,cutoffs_json,forecast_json,rules_json,study_sha256,note,code_version,purpose) "
+                                  "VALUES (?,?,?,?,?,?,?,?,?,?,?)", (_now(), label.strip(), json.dumps(plan, sort_keys=True, default=str), sha, json.dumps(cutoffs),
+                                                                     json.dumps(forecast), json.dumps(rules), study_sha256, note, code_version(), purpose))
         except sqlite3.IntegrityError:
             raise ValueError("an identical plan is already frozen at the same data cutoff") from None
         self.db.commit()
         return int(cur.lastrowid)
 
     def get(self, fid: int) -> dict:
-        row = self.db.execute("SELECT id,created_at,label,plan_json,plan_sha256,cutoffs_json,forecast_json,rules_json,study_sha256,note,status,code_version "
+        row = self.db.execute("SELECT id,created_at,label,plan_json,plan_sha256,cutoffs_json,forecast_json,rules_json,study_sha256,note,status,code_version,purpose "
                               "FROM frozen WHERE id=?", (fid,)).fetchone()
         if row is None:
             raise ValueError("unknown frozen candidate")
-        keys = ("id", "created_at", "label", "plan", "plan_sha256", "cutoffs", "forecast", "rules", "study_sha256", "note", "status", "code_version")
+        keys = ("id", "created_at", "label", "plan", "plan_sha256", "cutoffs", "forecast", "rules", "study_sha256", "note", "status", "code_version", "purpose")
         d = dict(zip(keys, row))
         for k in ("plan", "cutoffs", "forecast", "rules"):
             d[k] = json.loads(d[k])
@@ -177,7 +187,7 @@ class ForwardTracker:
             if fetch_errors:
                 snap["fetch_errors"] = fetch_errors
             self.db.execute("INSERT INTO forward_log(frozen_id,created_at,as_of,snapshot_json) VALUES (?,?,?,?)", (c["id"], _now(), snap["as_of"], json.dumps(snap, default=str)))
-            out.append({"id": c["id"], "label": c["label"], **snap})
+            out.append({"id": c["id"], "label": c["label"], "purpose": c["purpose"], **snap})
         self.db.commit()
         return out
 
@@ -191,7 +201,8 @@ class ForwardTracker:
             c = self.get(r[0])
             hist = self.history(c["id"])
             last = hist[-1] if hist else None
-            row = {"id": c["id"], "label": c["label"], "status": c["status"], "forecast": c["forecast"],
+            row = {"id": c["id"], "label": c["label"], "purpose": c["purpose"], "counts_as_candidate": c["purpose"] == "candidate",
+                   "status": c["status"], "forecast": c["forecast"],
                    "verdict": (last or {}).get("verdict", {}).get("verdict", "not_evaluated")}
             if last and row["verdict"] in ("confirmed", "refuted", "inconclusive") and last.get("expectancy") is not None:
                 y = 1.0 if last["expectancy"] > 0 else 0.0
@@ -201,6 +212,8 @@ class ForwardTracker:
                 briers.append(row["brier"])
             rows.append(row)
         scored = len(briers)
-        return {"candidates": rows, "scored": scored, "mean_brier": float(np.mean(briers)) if briers else None,
+        by = {p: [r for r in rows if r["purpose"] == p] for p in PURPOSES}
+        return {"candidates": rows, "qualified_candidates": len(by["candidate"]), "calibration_only": len(by["calibration"]),
+                "scored": scored, "mean_brier": float(np.mean(briers)) if briers else None,
                 "baseline_brier_always_0.5": 0.25, "skill_vs_coin": (1 - float(np.mean(briers)) / 0.25) if briers else None,
-                "note": "Brier 0 is perfect, 0.25 equals always answering 50 %. Skill > 0 means her stated probabilities beat a coin flip; it needs many scored candidates to mean anything."}
+                "note": "Only purpose 'candidate' entries met a study's candidate criteria; 'calibration' entries exist to score forecasts and are never candidates. Brier 0 is perfect, 0.25 equals always answering 50 %. Skill > 0 means her stated probabilities beat a coin flip; it needs many scored candidates to mean anything."}
