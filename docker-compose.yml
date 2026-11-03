@@ -40,6 +40,7 @@ services:
     environment:
       # SECURITY: Set these in your .env file, not here
       - SECRET_KEY=${SECRET_KEY:-}  # Required - generate with: openssl rand -hex 32
+      - OPS_LOG_READ_AGENTS=${OPS_LOG_READ_AGENTS:-}  # Optional: comma-separated agent names whose FINISHED execution logs an `ops` key may read (empty = none). Needs a restart.
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}  # Required - set a strong password
       - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
