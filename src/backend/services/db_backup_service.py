@@ -92,6 +92,7 @@ def _int_env(name: str, default: int, low: int, high: int) -> int:
 # "disabled" must mean disabled for BOTH producers, or an opted-out install
 # accumulates un-pruned boot copies (the prune lives only in this job's tail).
 DB_BACKUP_ENABLED = bp.backup_enabled_from_env()
+BACKUP_MISFIRE_GRACE_SECONDS = 86400      # see DatabaseBackupService.start
 DB_BACKUP_HOUR = _int_env("DB_BACKUP_HOUR", 3, 0, 23)
 DB_BACKUP_MINUTE = _int_env("DB_BACKUP_MINUTE", 30, 0, 59)
 
@@ -251,7 +252,11 @@ class DBBackupService:
             id="db_backup",
             name="Daily database backup",
             replace_existing=True,
-            misfire_grace_time=3600,
+            # A host that is suspended at 03:30 UTC (laptop, VM, WSL) resumes hours later; with a 1 h grace the run was then SKIPPED and backups silently
+            # stopped for days ("Run time of job ... was missed by 5:38:24"). The run is day-keyed and idempotent (the artifact name is the UTC day), so
+            # running late is safe: allow up to a day, and collapse several missed runs into one.
+            misfire_grace_time=BACKUP_MISFIRE_GRACE_SECONDS,
+            coalesce=True,
         )
         self.scheduler.start()
         logger.info(
