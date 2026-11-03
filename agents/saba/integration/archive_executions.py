@@ -9,6 +9,9 @@ of the agent into an append-only local archive:
   <out>/status.json              last attempt / last success / result, for monitoring
   <out>/ALERT                    exists only while the last run failed or the archive is stale (the visible failure signal)
 
+Authentication: the dedicated read-only ops key (~/.config/saba-trinity/archive.hdr, see trinity_archive_key.sh) when it exists, otherwise the
+operator login token. Errors name the cause (key revoked / route refused / login expired).
+
 Modes (one per invocation):
   (default)            archive new finished executions
   --verify             integrity check of the archive on disk (hashes, chain, orphans, permissions, secret scan); exit 1 on any problem
@@ -66,12 +69,42 @@ class ArchiveError(RuntimeError):
     pass
 
 
-def api(path):
-    r = subprocess.run([str(HERE / "trinity_api.sh"), "GET", path], capture_output=True, text=True, timeout=120)
+ARCHIVE_KEY_DEFAULT = "~/.config/saba-trinity/archive.hdr"
+KEY_ROTATE_DAYS = 90
+
+
+def auth_source(explicit=None):
+    """(path, kind): the dedicated read-only ops key when it exists (kind 'archive_key'), otherwise the operator's login token (kind 'admin_jwt')."""
+    for cand in (explicit, os.environ.get("SABA_ARCHIVE_KEY_FILE"), ARCHIVE_KEY_DEFAULT):
+        if cand and Path(cand).expanduser().is_file():
+            return str(Path(cand).expanduser()), "archive_key"
+    return None, "admin_jwt"
+
+
+def key_info(path=None):
+    """Age of the archive key from its (secret-free) metadata file, or None."""
+    meta = Path(path or os.environ.get("SABA_ARCHIVE_KEY_FILE") or ARCHIVE_KEY_DEFAULT).expanduser().with_suffix(".meta")
+    try:
+        m = json.loads(meta.read_text())
+        return {"key_id": m["key_id"], "age_days": (_now() - datetime.fromisoformat(m["created_at"])).days}
+    except (OSError, ValueError, KeyError):
+        return None
+
+
+def api(path, auth_file=None):
+    key_path, kind = auth_source(auth_file)
+    env = {**os.environ, **({"SABA_AUTH_FILE": key_path} if key_path else {})}
+    r = subprocess.run([str(HERE / "trinity_api.sh"), "GET", path], capture_output=True, text=True, timeout=120, env=env)
     if r.returncode:
         err = r.stderr.strip()[:200]
-        if "HTTP 401" in err or "HTTP 403" in err or "not logged in" in err:
+        if "HTTP 401" in err or "not logged in" in err:
+            if kind == "archive_key":
+                raise ArchiveError("Trinity rejected the archive key (revoked, owner suspended or key replaced): create a new one with integration/trinity_archive_key.sh create")
             raise ArchiveError("Trinity login expired or missing: run integration/trinity_login.sh (token lasts 7 days, ends at backend restart)")
+        if "HTTP 403" in err:
+            if kind == "archive_key":
+                raise ArchiveError("Trinity refused this route for the ops key: the backend must run with OPS_LOG_READ_AGENTS=<agent> (restart needed) or the ops allowlist changed")
+            raise ArchiveError("Trinity refused the request (HTTP 403)")
         raise ArchiveError(f"{path}: {err}")
     return json.loads(r.stdout)
 
@@ -144,7 +177,7 @@ def archive(a, out: Path) -> dict:
         try:
             log = api(f"/api/agents/{a.agent}/executions/{eid}/log")
         except ArchiveError as exc:
-            if "login expired" in str(exc):
+            if "login expired" in str(exc) or "archive key" in str(exc) or "ops key" in str(exc):
                 raise
             failures.append(f"{eid}: {exc}")
             continue
@@ -243,7 +276,12 @@ def status(out: Path, max_age_hours: float) -> dict:
         problems.append(f"last run failed: {st.get('last_error')}")
     if (out / "ALERT").exists():
         problems.append("ALERT file present: " + (out / "ALERT").read_text().strip()[:200])
-    return {"ok": not problems, "problems": problems, **{k: st.get(k) for k in ("last_attempt", "last_success", "last_result", "archived_total")}}
+    _, kind = auth_source()
+    ki = key_info() if kind == "archive_key" else None
+    if kind == "archive_key" and ki and ki["age_days"] > KEY_ROTATE_DAYS:
+        problems.append(f"archive key is {ki['age_days']} days old (rotate after {KEY_ROTATE_DAYS}): integration/trinity_archive_key.sh")
+    return {"ok": not problems, "problems": problems, "auth": kind, "key": ki,
+            **{k: st.get(k) for k in ("last_attempt", "last_success", "last_result", "archived_total")}}
 
 
 # ---------------------------------------------------------------------------------------------------------------- main

@@ -67,8 +67,9 @@ långlivad läsnyckel vore en plattformsändring och har inte skapats.
 samma bevis (samma experiment-id och resultat-hash, verifierat) och en tydlig hänvisning skapas. Båda finns kvar i databasen och i
 händelseloggen.
 
-## Förslag (ej genomfört): långlivad, begränsad läsbehörighet för arkiveraren
-Status: **förslag för beslut.** Ingenting i Trinitys autentisering är ändrat.
+## Långlivad, begränsad läsbehörighet för arkiveraren
+Status 2026-11-03: **PR öppnad, ej driftsatt.** Trinity-PR: `MatteoDiAmare/trinity-pulsit-online` #3 (`OPS_LOG_READ_AGENTS`, en agent i taget, default av). Ingen omstart eller driftsättning av Trinity har gjorts;
+Trinitys autentisering och scopes är oförändrade i den körande instansen. Retention är höjd (se nedan). Arkiveraren och nyckelskriptet är klara men nyckeln är inte skapad.
 
 **Problemet.** Arkiveraren använder operatörens admin-JWT (7 dagar, dör vid backend-omstart) och Trinity behåller loggar 5 dagar.
 
@@ -112,3 +113,24 @@ Status: **förslag för beslut.** Ingenting i Trinitys autentisering är ändrat
 - Ändringen berör en säkerhetsgräns (tillåtlistan är avsiktligt "fail closed"): den ska vara en rad, ha test och granskas som kod innan den driftsätts.
 
 **Alternativ utan kodändring (D ensam).** Höj `execution_log_retention_days` till 30. Då gör en missad veckoinloggning ingen skada: arkiveraren hämtar allt efterhand du loggar in igen inom 30 dagar. Kostar lite diskutrymme och är en global inställning, så den kräver ditt godkännande.
+
+
+### Undersökning: kan läsningen begränsas till Sabas loggar? Ja.
+`ops`-nyckeln är inte agentbunden (nyckelns `agent_name` är avsiktligt NULL så att rensningsjobben ser alla agentbundna nycklar), och en ny agentbunden nyckeltyp hade krävt ändring i tre svep.
+Lösningen är i stället att göra *rutten* agentspecifik: `OPS_LOG_READ_AGENTS=saba` i backendens miljö lägger till exakt
+`GET /api/agents/saba/executions/{id}/log` i `ops`-tillåtlistan (inget jokertecken över agenter; andra agenters transkript förblir stängda; GET endast; anchorat; ogiltiga namn ignoreras; läses en gång vid uppstart).
+Utan variabeln är beteendet oförändrat. Testat: 77 godkända i backend-venv, inklusive den befintliga `ops`-sviten; en bredare körning har identiska fel med och utan ändringen.
+
+### Aktivering (separat godkännande krävs för punkt 1)
+1. Sätt `OPS_LOG_READ_AGENTS=saba` i backendens `.env`, bygg om/starta om backend (invalidierar JWT, MCP-klienter återansluter) – **inte gjort**.
+2. Du kör `integration/trinity_archive_key.sh create` i din terminal (lösenord utan eko; nyckeln skrivs direkt till `~/.config/saba-trinity/archive.hdr`, mode 600, skrivs aldrig ut).
+3. Arkiveraren väljer nyckeln automatiskt; fel som återkallad nyckel (401) och avvisad rutt (403, variabeln saknas) har egna, tydliga meddelanden; `--status` varnar efter 90 dagar.
+   Testat mot en lokal låtsasserver (skapa, vägra överskrivning, vägra icke-`ops`-nyckel, aldrig skriva ut nyckeln, återkalla).
+
+### Retention (genomfört 2026-11-03, efter kontroll)
+`execution_log_retention_days` och `execution_row_retention_days` höjda 5 → 30 via Trinitys validerade, revisionsloggade `PUT /api/settings/ops/config`.
+**Båda krävdes:** raderna raderas helt efter `execution_row_retention_days`, så att bara höja loggens retention hade inte hjälpt.
+Kontroller före ändringen: Trinitys databas är 11 MB; fleeten genererar ca 1–2,5 MB transkript per dag, alltså högst ~75 MB vid 30 dagar (säkerhetskopior: en kopia per natt, 14 dagar); disken har 950 GB ledigt.
+Åtkomstskydd: databasen ligger i en Docker-volym som bara root läser på värden, i containern är filen 644 (endast backend monterar volymen), säkerhetskopiekatalogen är 700. Längre retention betyder längre tid med känsliga transkript på samma plats, med oförändrat skydd.
+Återställning: `PUT /api/settings/ops/config {"settings":{"execution_log_retention_days":"5","execution_row_retention_days":"5"}}`.
+**Sidofynd (oförändrat):** Trinitys egen nattliga databassäkerhetskopia är markerad `stale: true`; senaste lyckade kopia är 2026-10-31 03:30 UTC. Det är plattformens jobb och har inte rörts.

@@ -149,6 +149,58 @@ class ArchiveTests(unittest.TestCase):
         self.assertTrue((self.out / "ALERT").exists())
 
 
+class AuthTests(ArchiveTests):
+    def fail(self, stderr):
+        ax.subprocess.run.return_value = mock.Mock(returncode=1, stderr=stderr, stdout="")
+
+    def test_prefers_the_archive_key_and_passes_it_to_the_api_helper(self):
+        key = Path(self.tmp.name) / "archive.hdr"
+        key.write_text("Authorization: Bearer x\n")
+        with mock.patch.dict(os.environ, {"SABA_ARCHIVE_KEY_FILE": str(key)}):
+            self.assertEqual(ax.auth_source(), (str(key), "archive_key"))
+            ax.subprocess.run.return_value = mock.Mock(returncode=0, stdout="[]", stderr="")
+            ax.api("/api/x")
+            self.assertEqual(ax.subprocess.run.call_args.kwargs["env"]["SABA_AUTH_FILE"], str(key))
+        with mock.patch.dict(os.environ, {"SABA_ARCHIVE_KEY_FILE": "", "HOME": self.tmp.name}), mock.patch.object(ax, "ARCHIVE_KEY_DEFAULT", str(Path(self.tmp.name) / "none.hdr")):
+            self.assertEqual(ax.auth_source(), (None, "admin_jwt"))
+
+    def test_errors_name_the_cause_for_each_credential(self):
+        key = Path(self.tmp.name) / "archive.hdr"
+        key.write_text("Authorization: Bearer x\n")
+        with mock.patch.dict(os.environ, {"SABA_ARCHIVE_KEY_FILE": str(key)}):
+            self.fail("HTTP 401: {}")
+            with self.assertRaisesRegex(ax.ArchiveError, "rejected the archive key"):
+                ax.api("/p")
+            self.fail("HTTP 403: {}")
+            with self.assertRaisesRegex(ax.ArchiveError, "OPS_LOG_READ_AGENTS"):
+                ax.api("/p")
+        with mock.patch.dict(os.environ, {"SABA_ARCHIVE_KEY_FILE": ""}), mock.patch.object(ax, "ARCHIVE_KEY_DEFAULT", str(Path(self.tmp.name) / "none.hdr")):
+            self.fail("HTTP 401: {}")
+            with self.assertRaisesRegex(ax.ArchiveError, "login expired"):
+                ax.api("/p")
+
+    def test_key_age_over_the_limit_is_reported(self):
+        key = Path(self.tmp.name) / "archive.hdr"
+        key.write_text("Authorization: Bearer x\n")
+        old = (datetime.now(timezone.utc) - timedelta(days=120)).isoformat()
+        key.with_suffix(".meta").write_text(json.dumps({"key_id": "k1", "created_at": old}))
+        ax.write_status(self.out, last_success=datetime.now(timezone.utc).isoformat(), last_result="ok")
+        with mock.patch.dict(os.environ, {"SABA_ARCHIVE_KEY_FILE": str(key)}):
+            res = ax.status(self.out, 36)
+        self.assertFalse(res["ok"])
+        self.assertIn("120 days old", " ".join(res["problems"]))
+        self.assertEqual(res["key"]["key_id"], "k1")
+
+    def test_revoked_key_during_a_run_raises_the_alert(self):
+        key = Path(self.tmp.name) / "archive.hdr"
+        key.write_text("Authorization: Bearer x\n")
+        with mock.patch.dict(os.environ, {"SABA_ARCHIVE_KEY_FILE": str(key)}):
+            self.fail("HTTP 401: {}")
+            self.assertEqual(ax.main(["--out", str(self.out)]), 1)
+        self.assertIn("archive key", ax.read_status(self.out)["last_error"])
+        self.assertTrue((self.out / "ALERT").exists())
+
+
 class VerifyTests(ArchiveTests):
     def make(self):
         self.run_with(FakeTrinity([ex("a"), ex("b"), ex("c")], {"a": [1], "b": [2], "c": [3]}))
