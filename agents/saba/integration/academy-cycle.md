@@ -42,7 +42,7 @@ Studies, walk-forward, frozen candidates and your own forecasts (new)
   cycle budget and takes about a minute; an identical study is returned from the registry and costs nothing. Add `"hypothesis_id": H` to link the study to a hypothesis as evidence (no
   trials are charged to the hypothesis; the study's cells are counted once in the global trial index). If the study is the whole evidence, register the hypothesis with `"experiments": []`
   and `"study_only": true`.
-  More markets and longer history make a study far more sensitive: with 3 markets only a true per-market Sharpe above ~1.8 could be detected, with 16 markets and full history about 0.3.
+  More markets and longer history make a study far more sensitive: with 3 markets and ~5 out-of-sample years only a true per-market Sharpe above ~1.8 could be detected; with 16 markets and full history about 0.3.
   Prefer many markets (but they are correlated: equity indices move together, FX pairs share the dollar). Data is clipped to each market's usable start automatically and glitch bars are
   removed in a cleaned view; the result lists `data_quality`, `glitch_bars_removed` and `excluded_markets`. `refresh_data` appends the latest daily bars (run it at the start of a cycle). For your own code use `"code_file": "name.py"` and grid paths that start with `params.`.
 - Read the result honestly. `wfo` is the out-of-sample evidence of the whole search procedure; `dsr` is the probability that it beats what the best of N zero-edge trials would reach (N includes
