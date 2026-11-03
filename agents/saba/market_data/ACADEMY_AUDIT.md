@@ -66,3 +66,49 @@ långlivad läsnyckel vore en plattformsändring och har inte skapats.
 `academy_cli correct-lesson` ändrar aldrig en lärdom: originalet behålls oförändrat och markeras `superseded_by`; en ny lärdom med
 samma bevis (samma experiment-id och resultat-hash, verifierat) och en tydlig hänvisning skapas. Båda finns kvar i databasen och i
 händelseloggen.
+
+## Förslag (ej genomfört): långlivad, begränsad läsbehörighet för arkiveraren
+Status: **förslag för beslut.** Ingenting i Trinitys autentisering är ändrat.
+
+**Problemet.** Arkiveraren använder operatörens admin-JWT (7 dagar, dör vid backend-omstart) och Trinity behåller loggar 5 dagar.
+
+**Vad Trinity redan har (kodgranskat i `src/backend/dependencies.py`, `routers/mcp_keys.py`).**
+- MCP-nycklar (`trinity_mcp_…`): lagras som sha256-hash, har **ingen utgångstid**, kan återkallas direkt (`POST /api/mcp/keys/{id}/revoke`), visar `last_used_at`
+  och attribueras i plattformens revisionslogg (nyckel-id).
+- Nyckelscope `ops` (#2323): en *smalare* maskinidentitet, bara `GET` på en fast tillåtlista (fleet-hälsa, telemetri, körningslistor …), kan inte nå admin-portar
+  (de är stängda för `ops` om inte en rutt uttryckligen släpper in den), kan bara skapas av en inloggad admin (inte via en annan nyckel), och dör om ägaren
+  degraderas eller stängs av.
+- **Luckan:** tillåtlistan innehåller `GET /api/agents/{namn}/executions` (lista) men **inte** `GET /api/agents/{namn}/executions/{id}/log`, den rutt som ger Sabas
+  fulla transkript. En `ops`-nyckel kan alltså inte hämta loggarna idag.
+
+**Alternativ**
+| # | Alternativ | Ändring i Trinity | Behörighet för nyckeln | Bedömning |
+|---|---|---|---|---|
+| A | Nuvarande admin-JWT | ingen | full admin, 7 dagar | det vi har; kräver inloggning varje vecka |
+| B | `user`-nyckel ägd av admin | ingen | **full admin, ingen utgång** | fungerar direkt men värsta tänkbara läckage; avråds |
+| C | **`ops`-nyckel + en ny tillåten GET-rutt (loggen)** | 1 rad i `_OPS_ALLOWED_ROUTES` + testuppdatering | **endast läsning**, fasta rutter, ingen utgång, återkallbar | **rekommenderas** |
+| D | Höj `execution_log_retention_days` 5→30 | global inställning (ingen kod) | oförändrad | bra extra skyddsnät, löser inte inloggningen |
+| E | Läs Trinitys databas direkt via Docker | ingen | allt i plattformsdatabasen | avråds (går förbi autentiseringen och rör plattformens interna data) |
+| F | Förläng JWT-livslängden | global auth-inställning | full admin, längre | avråds (försvagar alla sessioner) |
+
+**Rekommendation: C, med D som skyddsnät.**
+1. *Trinity-ändring (egen branch/PR i din fork, granskas av dig före sammanslagning):* lägg till exakt en rad i `_OPS_ALLOWED_ROUTES`:
+   `("GET", re.compile(r"^/api/agents/[^/]+/executions/[^/]+/log$"))`, uppdatera `tests/unit/test_2323_machine_identities.py` (rutten flyttas från "nekad" till "tillåten läsning";
+   nytt test att `POST` mot den och alla andra loggrutter fortsatt nekas). Ingen ändring av JWT, scopes, retention eller andra agenter.
+2. *Driftsättning:* backend måste byggas om/startas om. Det ogiltigförklarar alla JWT och kräver att MCP-klienter återansluts, så det görs i ett lugnt fönster efter ditt uttryckliga godkännande.
+3. *Skapa nyckeln (du, en gång):* nytt skript `integration/trinity_archive_key.sh` (samma mönster som `trinity_login.sh`: lösenord utan eko, aldrig på kommandoraden)
+   loggar in, skapar nyckeln `saba-audit-archiver` med scope `ops`, skriver headerfilen `~/.config/saba-trinity/archive.hdr` (mode 600) direkt från svaret utan att skriva ut den,
+   och sparar nyckel-id (inte hemligheten) för återkallning. Nyckeln visas aldrig i terminal, logg eller git.
+4. *Arkiveraren* använder `archive.hdr` i stället för admin-JWT och skiljer felen åt: 401 "nyckeln återkallad/ogiltig", 403 "tillåtlistan har ändrats", anslutningsfel "Trinity nere";
+   `--status` varnar när nyckeln är äldre än 90 dagar (rotation: skapa ny, verifiera, återkalla gammal med `POST /api/mcp/keys/{id}/revoke`).
+5. *Verifiering före ibruktagande:* nyckeln kan hämta logg och lista körningar; nekas på chatt, filer, start/stopp, nyckelhantering och alla `POST`; återkallad nyckel ger 401 omedelbart.
+
+**Säkerhetskonsekvenser**
+- Nyckeln bär **läsrätt till alla agenters exekveringstranskript** (rutten är inte agentbegränsad i tillåtlistan) och ops-telemetri (kostnader, scheman, flottstatus). Transkript kan innehålla känsligt
+  innehåll. Det är mindre än dagens admin-JWT (som kan allt) men inte noll. Arkiveraren begär bara `saba`.
+- Läckt nyckel = läsning, inte skrivning; ingen utgång, så en läcka ser ut som normal användning tills `last_used_at`/revisionsloggen granskas. Därför: filmode 600, inga kopior, rotation var 90:e dag, återkalla vid minsta misstanke.
+- Nyckeln är knuten till admin-kontot: degraderas eller stängs kontot av dör nyckeln (synligt larm), vilket är önskat.
+- Värdkompromiss ger fortfarande nyckeln, men inte skrivrättigheter. Rätten att skapa nyckeln kräver interaktiv inloggning, så en agent kan inte skapa den själv.
+- Ändringen berör en säkerhetsgräns (tillåtlistan är avsiktligt "fail closed"): den ska vara en rad, ha test och granskas som kod innan den driftsätts.
+
+**Alternativ utan kodändring (D ensam).** Höj `execution_log_retention_days` till 30. Då gör en missad veckoinloggning ingen skada: arkiveraren hämtar allt efterhand du loggar in igen inom 30 dagar. Kostar lite diskutrymme och är en global inställning, så den kräver ditt godkännande.
