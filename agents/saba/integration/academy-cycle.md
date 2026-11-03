@@ -39,7 +39,8 @@ Studies, walk-forward, frozen candidates and your own forecasts (new)
 - Prefer a STUDY to hand-made variants. One pre-registered grid (at most 60 cells; each combination of parameters is a cell) is evaluated as ONE piece of research:
   walk-forward over rolling windows, on all the markets you list, with the parameters of each window chosen from its training part only and tested on the unseen part after it.
   Send `{"command": "run_study", "cycle_id": N, "study": {...}}` (see `help` for the exact JSON; typical daily geometry: `train_bars` 750, `test_bars` 125). A study costs ONE experiment of the
-  cycle budget and takes about a minute; an identical study is returned from the registry and costs nothing. Add `"hypothesis_id": H` to link the study to a hypothesis as evidence (no
+  cycle budget. Runtime grows with the number of markets: about a minute for 3 markets, about 4-5 minutes for 16. Call the bridge for a study with the Bash tool's `timeout` set to 600000 (ms),
+  otherwise the default 2-minute limit can cut it off after the budget has been charged; an identical study is returned from the registry and costs nothing. Add `"hypothesis_id": H` to link the study to a hypothesis as evidence (no
   trials are charged to the hypothesis; the study's cells are counted once in the global trial index). If the study is the whole evidence, register the hypothesis with `"experiments": []`
   and `"study_only": true`.
   More markets and longer history make a study far more sensitive: with 3 markets and ~5 out-of-sample years only a true per-market Sharpe above ~1.8 could be detected; with 16 markets and full history about 0.3.
