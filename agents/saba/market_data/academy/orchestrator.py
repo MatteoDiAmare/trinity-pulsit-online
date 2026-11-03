@@ -138,6 +138,8 @@ class Orchestrator:
         if not hyp["plan_intact"]:
             raise ValueError("hypothesis plan differs from its pre-registration")
         plan = hyp["plan"]
+        if plan.get("study_only"):
+            raise ValueError("this hypothesis is evidenced by studies: use run_study with its hypothesis_id (nothing to run here)")
         cells = len(plan["experiments"]) * len(plan["instruments"])
         left = self.budget.max_experiments_per_cycle - cyc["experiments_run"]
         if cells > left:
