@@ -1,0 +1,450 @@
+{
+ "title": "BTC/USD hourly walk-forward studies (Bitstamp), negative results",
+ "date": "2026-11-03",
+ "instrument": "BTCUSD_BITSTAMP",
+ "instrument_spec_sha256": "49a3b73085ef9226...",
+ "data": {
+  "source": "Bitstamp public API /api/v2/ohlc/btcusd, 60m",
+  "parquet_sha256_prefix": "4a6a43ed057930ef",
+  "bars": 68726,
+  "first": "2019-01-01T00:00:00Z",
+  "last": "2026-11-03T13:00:00Z",
+  "development_window": "2019-01-01 -> 2025-04-09 (first 80 %; the last 20 % was never touched)",
+  "development_dataset_sha256_prefix": "9f90212b09debe0a"
+ },
+ "method": {
+  "fold_mode": "days",
+  "train_days": 180,
+  "test_days": 30,
+  "each_run_in_its_own_empty_registry": true,
+  "grids": {
+   "sma": {
+    "short": [
+     6,
+     12,
+     24
+    ],
+    "long": [
+     48,
+     96,
+     240
+    ],
+    "stop_loss_pct": 1.5
+   },
+   "breakout": {
+    "window": [
+     24,
+     48,
+     96
+    ],
+    "stop_loss_pct": [
+     0.8,
+     1.5,
+     2.5
+    ]
+   },
+   "mr": {
+    "window": [
+     24,
+     48,
+     96
+    ],
+    "z_entry": [
+     1.5,
+     2.0,
+     2.5
+    ],
+    "stop_loss_pct": 1.5
+   }
+  }
+ },
+ "assumptions_UNVERIFIED": {
+  "fee_bps_per_fill": 10,
+  "spread_bps": 5,
+  "slippage_bps_base": 5,
+  "slippage_range_fraction": 0.06,
+  "spread_hour_multiplier_range": [
+   0.9,
+   1.2
+  ],
+  "weekend_spread_multiplier": 1.4,
+  "financing_bps_per_day_long_and_short": 3.0,
+  "max_leverage": 2.0,
+  "risk_per_trade_pct": 1.0,
+  "daily_loss_limit_pct": 3.0,
+  "max_drawdown_halt_pct": 20.0,
+  "intraday_policy": "no entries from 21:30, flat by 21:45 Europe/Stockholm"
+ },
+ "runs": [
+  {
+   "family": "breakout",
+   "variant": "policy_x1",
+   "folds": 70,
+   "oos_years": 5.75,
+   "trades": 771,
+   "hit_rate": 0.3333,
+   "expectancy_per_trade": -1.682,
+   "expectancy_ci95": [
+    -2.196384645779478,
+    -1.1535365342799107
+   ],
+   "return_pct": -73.545,
+   "sharpe_annualized": -2.417,
+   "dsr": 0.0,
+   "pbo": 0.0,
+   "trials_for_deflation": 9,
+   "cost_paid": 1215.96,
+   "financing_paid": 6.04,
+   "trades_held_overnight": 0,
+   "exit_reasons": {
+    "policy_flatten": 584,
+    "stop_loss": 178,
+    "reversal": 3,
+    "risk_flatten_daily": 1,
+    "end_of_data": 5
+   },
+   "verdict": "no_evidence",
+   "failed_criteria": [
+    "walk-forward out-of-sample Sharpe is not positive",
+    "deflated Sharpe 0.00 < 0.95 (N=9 trials)",
+    "expectancy per trade is not significantly above zero (95% bootstrap interval)",
+    "only 19% of folds are positive"
+   ],
+   "buy_and_hold_sharpe": 0.84,
+   "buy_and_hold_return_pct": 596.607,
+   "bars_per_year_used": 8770.2,
+   "policy": {
+    "bar_minutes": 60,
+    "tz": "Europe/Stockholm",
+    "last_entry_min": 1290,
+    "flatten_min": 1305
+   },
+   "allow_overnight": false,
+   "cost_multiplier": 1.0,
+   "seconds": 188.6
+  },
+  {
+   "family": "breakout",
+   "variant": "policy_x2",
+   "folds": 70,
+   "oos_years": 5.75,
+   "trades": 837,
+   "hit_rate": 0.2927,
+   "expectancy_per_trade": -2.6511,
+   "expectancy_ci95": [
+    -3.138220604156258,
+    -2.1578289059984344
+   ],
+   "return_pct": -89.809,
+   "sharpe_annualized": -3.943,
+   "dsr": 0.0,
+   "pbo": 0.0,
+   "trials_for_deflation": 9,
+   "cost_paid": 2141.42,
+   "financing_paid": 6.88,
+   "trades_held_overnight": 0,
+   "exit_reasons": {
+    "policy_flatten": 636,
+    "stop_loss": 188,
+    "reversal": 7,
+    "risk_flatten_daily": 1,
+    "end_of_data": 5
+   },
+   "verdict": "no_evidence",
+   "failed_criteria": [
+    "walk-forward out-of-sample Sharpe is not positive",
+    "deflated Sharpe 0.00 < 0.95 (N=9 trials)",
+    "expectancy per trade is not significantly above zero (95% bootstrap interval)",
+    "only 10% of folds are positive"
+   ],
+   "buy_and_hold_sharpe": 0.84,
+   "buy_and_hold_return_pct": 596.607,
+   "bars_per_year_used": 8770.2,
+   "policy": {
+    "bar_minutes": 60,
+    "tz": "Europe/Stockholm",
+    "last_entry_min": 1290,
+    "flatten_min": 1305
+   },
+   "allow_overnight": false,
+   "cost_multiplier": 2.0,
+   "seconds": 176.7
+  },
+  {
+   "family": "mr",
+   "variant": "policy_x1",
+   "folds": 70,
+   "oos_years": 5.75,
+   "trades": 1800,
+   "hit_rate": 0.3011,
+   "expectancy_per_trade": -1.9496,
+   "expectancy_ci95": [
+    -2.2268219372165725,
+    -1.6929130889074089
+   ],
+   "return_pct": -97.4,
+   "sharpe_annualized": -5.608,
+   "dsr": 0.0,
+   "pbo": 0.1,
+   "trials_for_deflation": 9,
+   "cost_paid": 2766.9,
+   "financing_paid": 33.3,
+   "trades_held_overnight": 0,
+   "exit_reasons": {
+    "stop_loss": 685,
+    "policy_flatten": 899,
+    "risk_flatten_daily": 6,
+    "signal_close": 197,
+    "end_of_data": 13
+   },
+   "verdict": "no_evidence",
+   "failed_criteria": [
+    "walk-forward out-of-sample Sharpe is not positive",
+    "deflated Sharpe 0.00 < 0.95 (N=9 trials)",
+    "expectancy per trade is not significantly above zero (95% bootstrap interval)",
+    "only 4% of folds are positive"
+   ],
+   "buy_and_hold_sharpe": 0.84,
+   "buy_and_hold_return_pct": 596.607,
+   "bars_per_year_used": 8770.2,
+   "policy": {
+    "bar_minutes": 60,
+    "tz": "Europe/Stockholm",
+    "last_entry_min": 1290,
+    "flatten_min": 1305
+   },
+   "allow_overnight": false,
+   "cost_multiplier": 1.0,
+   "seconds": 370.9
+  },
+  {
+   "family": "mr",
+   "variant": "policy_x2",
+   "folds": 70,
+   "oos_years": 5.75,
+   "trades": 2056,
+   "hit_rate": 0.2427,
+   "expectancy_per_trade": -2.8287,
+   "expectancy_ci95": [
+    -3.061060728503218,
+    -2.592534100669204
+   ],
+   "return_pct": -99.786,
+   "sharpe_annualized": -9.016,
+   "dsr": 0.0,
+   "pbo": 0.0,
+   "trials_for_deflation": 9,
+   "cost_paid": 5006.56,
+   "financing_paid": 34.87,
+   "trades_held_overnight": 0,
+   "exit_reasons": {
+    "stop_loss": 811,
+    "policy_flatten": 970,
+    "end_of_data": 13,
+    "signal_close": 242,
+    "risk_flatten_daily": 12,
+    "stop_gap": 8
+   },
+   "verdict": "no_evidence",
+   "failed_criteria": [
+    "walk-forward out-of-sample Sharpe is not positive",
+    "deflated Sharpe 0.00 < 0.95 (N=9 trials)",
+    "expectancy per trade is not significantly above zero (95% bootstrap interval)",
+    "only 0% of folds are positive"
+   ],
+   "buy_and_hold_sharpe": 0.84,
+   "buy_and_hold_return_pct": 596.607,
+   "bars_per_year_used": 8770.2,
+   "policy": {
+    "bar_minutes": 60,
+    "tz": "Europe/Stockholm",
+    "last_entry_min": 1290,
+    "flatten_min": 1305
+   },
+   "allow_overnight": false,
+   "cost_multiplier": 2.0,
+   "seconds": 315.2
+  },
+  {
+   "family": "sma",
+   "variant": "overnight_x1",
+   "folds": 70,
+   "oos_years": 5.75,
+   "trades": 1190,
+   "hit_rate": 0.2008,
+   "expectancy_per_trade": -1.3046,
+   "expectancy_ci95": [
+    -1.9938528650086922,
+    -0.5838043552005739
+   ],
+   "return_pct": -81.501,
+   "sharpe_annualized": -1.573,
+   "dsr": 0.0,
+   "pbo": 0.35714285714285715,
+   "trials_for_deflation": 9,
+   "cost_paid": 1691.83,
+   "financing_paid": 163.9,
+   "trades_held_overnight": 632,
+   "exit_reasons": {
+    "stop_loss": 486,
+    "risk_flatten_daily": 19,
+    "reversal": 615,
+    "end_of_data": 70
+   },
+   "verdict": "no_evidence",
+   "failed_criteria": [
+    "walk-forward out-of-sample Sharpe is not positive",
+    "deflated Sharpe 0.00 < 0.95 (N=9 trials)",
+    "expectancy per trade is not significantly above zero (95% bootstrap interval)",
+    "only 29% of folds are positive"
+   ],
+   "buy_and_hold_sharpe": 0.84,
+   "buy_and_hold_return_pct": 596.607,
+   "bars_per_year_used": 8770.2,
+   "policy": null,
+   "allow_overnight": true,
+   "cost_multiplier": 1.0,
+   "seconds": 187.4
+  },
+  {
+   "family": "sma",
+   "variant": "overnight_x2",
+   "folds": 70,
+   "oos_years": 5.75,
+   "trades": 1264,
+   "hit_rate": 0.1472,
+   "expectancy_per_trade": -2.2463,
+   "expectancy_ci95": [
+    -2.880366997586218,
+    -1.560696445646903
+   ],
+   "return_pct": -95.288,
+   "sharpe_annualized": -2.899,
+   "dsr": 0.0,
+   "pbo": 0.08571428571428572,
+   "trials_for_deflation": 9,
+   "cost_paid": 2858.56,
+   "financing_paid": 160.69,
+   "trades_held_overnight": 635,
+   "exit_reasons": {
+    "stop_loss": 559,
+    "reversal": 618,
+    "end_of_data": 67,
+    "risk_flatten_daily": 19,
+    "risk_flatten_drawdown": 1
+   },
+   "verdict": "no_evidence",
+   "failed_criteria": [
+    "walk-forward out-of-sample Sharpe is not positive",
+    "deflated Sharpe 0.00 < 0.95 (N=9 trials)",
+    "expectancy per trade is not significantly above zero (95% bootstrap interval)",
+    "only 24% of folds are positive"
+   ],
+   "buy_and_hold_sharpe": 0.84,
+   "buy_and_hold_return_pct": 596.607,
+   "bars_per_year_used": 8770.2,
+   "policy": null,
+   "allow_overnight": true,
+   "cost_multiplier": 2.0,
+   "seconds": 211.8
+  },
+  {
+   "family": "sma",
+   "variant": "policy_x1",
+   "folds": 70,
+   "oos_years": 5.75,
+   "trades": 3912,
+   "hit_rate": 0.2899,
+   "expectancy_per_trade": -1.3799,
+   "expectancy_ci95": [
+    -1.5591466941783478,
+    -1.1950173186845747
+   ],
+   "return_pct": -99.671,
+   "sharpe_annualized": -5.812,
+   "dsr": 0.0,
+   "pbo": 0.5428571428571428,
+   "trials_for_deflation": 9,
+   "cost_paid": 5177.2,
+   "financing_paid": 156.03,
+   "trades_held_overnight": 0,
+   "exit_reasons": {
+    "reversal": 687,
+    "stop_loss": 1136,
+    "policy_flatten": 2008,
+    "risk_flatten_daily": 13,
+    "end_of_data": 66,
+    "risk_flatten_drawdown": 2
+   },
+   "verdict": "no_evidence",
+   "failed_criteria": [
+    "walk-forward out-of-sample Sharpe is not positive",
+    "deflated Sharpe 0.00 < 0.95 (N=9 trials)",
+    "expectancy per trade is not significantly above zero (95% bootstrap interval)",
+    "probability of backtest overfitting 0.54 > 0.5",
+    "only 6% of folds are positive"
+   ],
+   "buy_and_hold_sharpe": 0.84,
+   "buy_and_hold_return_pct": 596.607,
+   "bars_per_year_used": 8770.2,
+   "policy": {
+    "bar_minutes": 60,
+    "tz": "Europe/Stockholm",
+    "last_entry_min": 1290,
+    "flatten_min": 1305
+   },
+   "allow_overnight": false,
+   "cost_multiplier": 1.0,
+   "seconds": 213.8
+  },
+  {
+   "family": "sma",
+   "variant": "policy_x2",
+   "folds": 70,
+   "oos_years": 5.75,
+   "trades": 3909,
+   "hit_rate": 0.2374,
+   "expectancy_per_trade": -2.131,
+   "expectancy_ci95": [
+    -2.3041724585444388,
+    -1.9541429700454216
+   ],
+   "return_pct": -99.988,
+   "sharpe_annualized": -9.047,
+   "dsr": 0.0,
+   "pbo": 0.4714285714285714,
+   "trials_for_deflation": 9,
+   "cost_paid": 8113.04,
+   "financing_paid": 147.2,
+   "trades_held_overnight": 0,
+   "exit_reasons": {
+    "stop_loss": 1280,
+    "reversal": 603,
+    "policy_flatten": 1946,
+    "risk_flatten_daily": 14,
+    "risk_flatten_drawdown": 7,
+    "end_of_data": 57,
+    "stop_gap": 2
+   },
+   "verdict": "no_evidence",
+   "failed_criteria": [
+    "walk-forward out-of-sample Sharpe is not positive",
+    "deflated Sharpe 0.00 < 0.95 (N=9 trials)",
+    "expectancy per trade is not significantly above zero (95% bootstrap interval)",
+    "only 0% of folds are positive"
+   ],
+   "buy_and_hold_sharpe": 0.84,
+   "buy_and_hold_return_pct": 596.607,
+   "bars_per_year_used": 8770.2,
+   "policy": {
+    "bar_minutes": 60,
+    "tz": "Europe/Stockholm",
+    "last_entry_min": 1290,
+    "flatten_min": 1305
+   },
+   "allow_overnight": false,
+   "cost_multiplier": 2.0,
+   "seconds": 232.2
+  }
+ ]
+}

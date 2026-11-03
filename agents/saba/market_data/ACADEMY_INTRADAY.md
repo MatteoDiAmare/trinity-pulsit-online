@@ -99,5 +99,5 @@ Fel som testerna hittade och som rättades: dygnsavdrift över sommartidsbyte i 
 Buy&hold samma period: Sharpe 0,84. Alla nio kombinationer: ingen edge; kostnaderna äter allt (kostnader betalda är i kontovaluta på ett konto om 1 000 per fold-kedja, summerade).
 **Policybeviset:** med policy 0 affärer hållna över natten och `policy_flatten` som dominerande utgång; när övernattshållning tillåts uttryckligen hålls 632 av 1 190 affärer över natten, och studiens spec säger `allow_overnight: true`.
 **Kostnadskänslighet:** dubbla kostnader försämrar varje resultat monotont (t.ex. SMA −5,8 → −9,0 Sharpe).
-**Statistisk styrka:** en marknad × 5,75 OOS-år × 9 försök kan bara upptäcka en sann årlig Sharpe på ≈3,6 (80 % styrka; luck-tröskel 0,76). Det är ett test av *metoden*, inte ett fynd om BTC: enkla timregler med antagna kostnader (≈45 bps tur och retur) är kostnadsdödade, och kostnadsantagandena är obekräftade.
+**Statistisk styrka:** en marknad × 5,75 OOS-år × 9 försök kan bara upptäcka en sann årlig Sharpe på ≈3,6 (80 % styrka; luck-tröskel 0,76). Det är ett test av *metoden*, inte ett fynd om BTC: enkla timregler med antagna kostnader (≈50 bps tur och retur) är kostnadsdödade, och kostnadsantagandena är obekräftade.
 Reproduktion: `integration/run_intraday_experiments.py`, `integration/analyze_intraday.py`.
