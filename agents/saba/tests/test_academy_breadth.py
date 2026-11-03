@@ -141,6 +141,23 @@ class PowerTests(unittest.TestCase):
 
 
 @unittest.skipIf(pd is None, "optional market-data dependencies not installed")
+class LegacyBenchmarkTests(unittest.TestCase):
+    def test_fixed_pooling_keeps_the_original_buy_and_hold_benchmark(self):
+        # earlier studies recorded buy&hold as: every market, every test date, divided by the number of markets
+        bars = {"GOLD": momentum_bars(1100, 1), "EURUSD": noise_bars(1100, 2)}
+        s = spec(pooling="fixed", fold_mode="bars", train_bars=300, test_bars=100, clean_data=False)
+        r = run_study(s, bars, {i: len(b) for i, b in bars.items()})
+        dates = sorted({d for row in r["fold_table"] if row.get("test_dates") for d in pd.bdate_range(*row["test_dates"]).strftime("%Y-%m-%d")})
+        got = 0.0
+        for i, b in bars.items():
+            cl = b["Close"].pct_change().fillna(0.0)
+            cl.index = [str(t.date()) for t in cl.index]
+            got += np.array([float(cl.get(d, 0.0)) for d in dates]) / 2
+        self.assertGreater(len(dates), 100)
+        self.assertAlmostEqual(r["benchmarks"]["buy_and_hold_return_pct"], float(np.prod(1 + got) - 1) * 100, delta=0.6)
+
+
+@unittest.skipIf(pd is None, "optional market-data dependencies not installed")
 class SpecFileTests(unittest.TestCase):
     def test_every_spec_is_valid_and_conservative(self):
         specs = available_instruments()

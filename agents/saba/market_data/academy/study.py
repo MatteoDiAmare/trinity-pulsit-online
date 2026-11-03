@@ -400,7 +400,10 @@ def _aggregate(spec, cells, ids, specs, dev, folds, results):
     for i in ids:
         cl = dev[i]["Close"].pct_change().fillna(0.0)
         cl.index = [_key(t, is_intraday(spec.interval)) for t in cl.index]
-        bh += np.array([float(cl.get(d, 0.0)) if d in active_days[i] else 0.0 for d in w_dates]) / (n_inst if fixed else np.maximum(n_active, 1.0))
+        if fixed:      # legacy pooling: exactly the original benchmark (every market on every test date, divided by the number of markets)
+            bh += np.array([float(cl.get(d, 0.0)) for d in w_dates]) / n_inst
+        else:
+            bh += np.array([float(cl.get(d, 0.0)) if d in active_days[i] else 0.0 for d in w_dates]) / np.maximum(n_active, 1.0)
     exp_ci = bootstrap_mean_ci(wfo_pnls)
     folds_with_trades = [r for r in fold_rows if r.get("oos_return_pct") is not None]
     pos_folds = float(np.mean([r["oos_return_pct"] > 0 for r in folds_with_trades])) if folds_with_trades else 0.0
