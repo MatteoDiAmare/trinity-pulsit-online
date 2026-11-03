@@ -22,6 +22,7 @@ import pandas as pd
 
 from .execution import CostModel, resolve_bar_exit
 from .instruments import InstrumentSpec
+from .intraday import IntradayCosts, SessionRules
 from .risk import RiskProfile, StressModel, size_position
 from .strategies import Decision, MarketView, PositionInfo, Strategy
 
@@ -37,6 +38,8 @@ class SimConfig:
     risk: RiskProfile = field(default_factory=RiskProfile)
     stress: StressModel = field(default_factory=StressModel)
     seed: int = 0                          # drives stop-failure draws only
+    session: SessionRules | None = None            # Saba's intraday policy (flat before the cut-off, no late entries); None = positions may be carried (daily studies)
+    intraday_costs: IntradayCosts | None = None    # time-of-day spread, range-scaled slippage, financing; None = flat costs (daily studies)
 
     def __post_init__(self):
         if self.capital <= 0 or self.min_notional < 0 or (self.max_exposure is not None and self.max_exposure <= 0):
@@ -54,17 +57,24 @@ class SimConfig:
 
     def to_dict(self) -> dict:
         base_costs = self.costs or (self.instrument.costs if self.instrument else CostModel())
-        return {"capital": self.capital, "costs": base_costs.as_dict(), "max_exposure": self.max_exposure,
-                "min_notional": self.min_notional, "allow_short": self.allow_short, "seed": self.seed,
-                "leverage_cap": self.leverage_cap(), "risk": self.risk.to_dict(), "stress": self.stress.to_dict(),
-                "instrument": self.instrument.to_dict() if self.instrument else None}
+        d = {"capital": self.capital, "costs": base_costs.as_dict(), "max_exposure": self.max_exposure,
+             "min_notional": self.min_notional, "allow_short": self.allow_short, "seed": self.seed,
+             "leverage_cap": self.leverage_cap(), "risk": self.risk.to_dict(), "stress": self.stress.to_dict(),
+             "instrument": self.instrument.to_dict() if self.instrument else None}
+        if self.session is not None:
+            d["session"] = self.session.to_dict()
+        if self.intraday_costs is not None:
+            d["intraday_costs"] = self.intraday_costs.to_dict()
+        return d
 
     @staticmethod
     def from_dict(d: dict) -> "SimConfig":
         return SimConfig(d["capital"], CostModel(**d["costs"]), d["max_exposure"], d.get("min_notional", 1.0),
                          d["allow_short"],
                          InstrumentSpec.from_dict(d["instrument"]) if d.get("instrument") else None,
-                         RiskProfile(**d["risk"]), StressModel(**d["stress"]), d.get("seed", 0))
+                         RiskProfile(**d["risk"]), StressModel(**d["stress"]), d.get("seed", 0),
+                         SessionRules.from_dict(d["session"]) if d.get("session") else None,
+                         IntradayCosts.from_dict(d["intraday_costs"]) if d.get("intraday_costs") else None)
 
 
 @dataclass
@@ -109,6 +119,14 @@ class Simulator:
         self._streak = 0
         self._flatten = None
         self._events, self._shortfall = [], 0.0
+        idx = bars.index
+        self._sess = cfg.session.arrays(idx) if cfg.session is not None else None
+        self._icost = None
+        if cfg.intraday_costs is not None:
+            self._icost = cfg.intraday_costs.arrays(idx)
+            rng = (arrays["high"] - arrays["low"]) / arrays["open"] * 1e4        # range of each bar in bps of its open
+            self._icost["rng_cur"] = rng
+            self._icost["rng_prev"] = np.concatenate([[0.0], rng[:-1]])           # known when an order is placed: no look-ahead
 
         try:
             return self._loop(bars, strategy, trade_start, end, arrays, index)
@@ -126,16 +144,20 @@ class Simulator:
         halted = None
         for i in range(trade_start, end):
             ts = index[i]
-            day = ts.date()
-            if day != self._day:           # new UTC day: daily limits reset
+            day = ts.date() if self._sess is None else self._sess["day"][i]       # UTC day; with session rules the LOCAL day of the policy timezone
+            if day != self._day:           # new day: daily limits reset
                 self._day, self._day_start = day, self._last_eq
                 if self._day_halt:
                     self._event(ts, "daily_halt_lifted")
                 self._day_halt, self._streak = False, 0
             last = i == end - 1
             if halted is None:
+                if self._pos is not None and self._icost is not None and self._icost["fin_days"][i] > 0:
+                    self._charge_financing(ts, c[i - 1] if i > 0 else o[i], self._icost["fin_days"][i])
                 if self._pos is not None:
                     self._protective(i, ts, o[i], h[i], l[i], orders, trades, gap_only=True)
+                if self._pos is not None and self._sess is not None and self._sess["must_flat"][i]:
+                    self._close(i, ts, o[i], "policy_flatten", False, orders, trades, market=True)          # intraday-only policy: never carried across the cut-off
                 if self._flatten is not None:
                     if self._pos is not None:
                         self._close(i, ts, o[i], self._flatten, False, orders, trades, market=True)
@@ -145,13 +167,15 @@ class Simulator:
                     pending = None
                 if self._pos is not None:
                     self._protective(i, ts, o[i], h[i], l[i], orders, trades, gap_only=False)
+            if halted is None and self._pos is not None and self._sess is not None and not last and self._sess["flat_at_close"][i]:
+                self._close(i, ts, c[i], "policy_flatten", False, orders, trades, market=True, rng="cur")        # flat at this bar's close: the next bar is past the cut-off
             if last and self._pos is not None:
-                self._close(i, ts, c[i], "end_of_data", False, orders, trades, market=True)
+                self._close(i, ts, c[i], "end_of_data", False, orders, trades, market=True, rng="cur")
             unreal = 0.0 if self._pos is None else self._pos["side"] * (c[i] - self._pos["entry"]) * self._pos["qty"]
             eq = self._balance + unreal
             if halted is None and eq <= 0:
                 if self._pos is not None:
-                    self._close(i, ts, c[i], "ruin", False, orders, trades, market=True)
+                    self._close(i, ts, c[i], "ruin", False, orders, trades, market=True, rng="cur")
                 halted = "ruin: equity exhausted"
                 self._event(ts, "ruin", shortfall=self._shortfall)
                 eq = self._balance = max(self._balance, 0.0)
@@ -215,6 +239,8 @@ class Simulator:
                 self._close(i, ts, open_price, "signal_close", False, orders, trades, market=True)
             return
         side = 1 if d.action == "BUY" else -1
+        if self._sess is not None and not self._sess["entry_ok"][i]:
+            return self._reject(ts, d, "policy_no_entry", orders)       # intraday-only policy: only entries that end before the flatten time
         if side == -1 and not cfg.allow_short:
             return self._reject(ts, d, "short_selling_disabled", orders)
         if d.stop_loss_pct is None:
@@ -232,7 +258,7 @@ class Simulator:
         orders.append({"timestamp": ts, "kind": "rejected", "action": d.action, "reason": why})
 
     def _open(self, i, ts, side, d, open_price, orders):
-        cfg, costs = self.cfg, self._costs
+        cfg, costs = self.cfg, self._costs_at(i, "prev")
         fill = costs.fill_price(open_price, side)
         sized, why = size_position(equity=self._balance, fill_price=fill, stop_pct=d.stop_loss_pct,
                                    size_fraction=d.size, leverage_cap=self._lev, fee_bps=costs.fee_bps,
@@ -281,10 +307,31 @@ class Simulator:
             reason, failed = "stop_failed", True
         adverse = stress.stop_slippage_pct + (stress.stop_failure_extra_pct if failed else 0.0)
         self._close(i, ts, ref, reason, ambiguous, orders, trades,
-                    market=reason.startswith(("stop", "liquidation")), extra_adverse_pct=adverse)
+                    market=reason.startswith(("stop", "liquidation")), extra_adverse_pct=adverse, rng="cur")
 
-    def _close(self, i, ts, ref, reason, ambiguous, orders, trades, *, market, extra_adverse_pct=0.0):
-        costs, p = self._costs, self._pos
+    def _costs_at(self, i, rng):
+        """Costs for a fill on bar i. Flat unless intraday costs are configured: spread x hour-of-day multiplier, slippage + a fraction of the bar range
+        (the PREVIOUS bar's for orders filled at the open, the bar's own for stops hit inside it)."""
+        base = self._costs
+        if self._icost is None:
+            return base
+        ic = self.cfg.intraday_costs
+        extra = self.cfg.stress.slippage_multiplier * ic.slippage_range_fraction * self._icost["rng_cur" if rng == "cur" else "rng_prev"][i]
+        return CostModel(base.fee_bps, base.spread_bps * float(self._icost["spread_mult"][i]), base.slippage_bps + float(extra))
+
+    def _charge_financing(self, ts, price, days):
+        p, ic = self._pos, self.cfg.intraday_costs
+        bps = ic.financing_long_bps_per_day if p["side"] == 1 else ic.financing_short_bps_per_day
+        charge = p["qty"] * price * bps / 1e4 * days
+        self._balance -= charge
+        p["financing"] = p.get("financing", 0.0) + charge
+        if self._balance < 0:
+            self._shortfall += -self._balance
+            self._event(ts, "negative_balance", shortfall=-self._balance, exit_reason="financing")
+            self._balance = 0.0
+
+    def _close(self, i, ts, ref, reason, ambiguous, orders, trades, *, market, extra_adverse_pct=0.0, rng="prev"):
+        costs, p = self._costs_at(i, rng), self._pos
         side = p["side"]
         exit_fill = costs.fill_price(ref, -side, slippage=market)
         if extra_adverse_pct:
@@ -299,7 +346,8 @@ class Simulator:
             self._balance = 0.0
         friction = p["qty"] * (abs(p["entry"] - p["entry_ref"]) + abs(exit_fill - ref))
         fees = p["entry_fee"] + fee
-        net = gross - fees
+        financing = p.get("financing", 0.0)
+        net = gross - fees - financing
         entry_notional = p["qty"] * p["entry"]
         self._streak = self._streak + 1 if net < 0 else 0
         orders.append({"timestamp": ts, "kind": "exit", "side": -side, "quantity": p["qty"],
@@ -311,5 +359,5 @@ class Simulator:
                        "net_return_pct": net / entry_notional * 100, "risk_amount": p["risk_amount"],
                        "r_multiple": net / p["risk_amount"] if p["risk_amount"] > 0 else None,
                        "binding_limit": p["binding"], "bars_held": i - p["bar"],
-                       "exit_reason": reason, "ambiguous": ambiguous})
+                       "exit_reason": reason, "ambiguous": ambiguous, **({"financing": financing} if self._icost is not None else {})})
         self._pos = None

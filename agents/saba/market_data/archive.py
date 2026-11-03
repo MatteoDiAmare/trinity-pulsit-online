@@ -113,12 +113,12 @@ class MarketArchive:
         finally:
             temp.unlink(missing_ok=True)
         info = {
-            "symbol": symbol, "interval": interval, "provider": "Yahoo Finance via yfinance",
+            "symbol": symbol, "interval": interval, "provider": getattr(provider, "source", "Yahoo Finance via yfinance"),
             "requested_period": period, "row_count": len(frame),
             "first_timestamp_utc": frame.index[0].isoformat(),
             "last_timestamp_utc": frame.index[-1].isoformat(),
             "updated_at_utc": datetime.now(timezone.utc).isoformat(),
-            "adjustment": "raw OHLC, separate dividends and splits where available",
+            "adjustment": getattr(provider, "adjustment", "raw OHLC, separate dividends and splits where available"),
         }
         tmp_info = metadata_path.with_name("metadata.tmp.json")
         try:

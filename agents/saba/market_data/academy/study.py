@@ -24,6 +24,7 @@ import itertools
 import json
 import math
 import os
+from collections import Counter
 from dataclasses import asdict, dataclass, field
 
 import numpy as np
@@ -31,6 +32,8 @@ import pandas as pd
 
 from .evaluation import compute_metrics
 from .instruments import load_instrument, usable_from
+from .intraday import SessionRules, intraday_costs, session_kind
+from .sessions import check_session, interval_minutes, is_intraday
 from .simulator import SimConfig, Simulator
 from .quality import check_bars, clean_bars
 from .risk import StressModel
@@ -79,10 +82,31 @@ class StudySpec:
     cost_multiplier: float = 1.0         # sensitivity: multiplies spread and slippage of every market
     clean_data: bool = True              # drop provider glitch bars (spike-and-revert, contradicting open); the archive itself is never changed
     respect_usable_from: bool = True     # clip each market to the start of its usable history
+    # ---- intraday (all optional; at their defaults they are left out of the recorded spec, so earlier studies keep their hash)
+    train_days: int | None = None        # fold_mode "days": window lengths in CALENDAR days (intraday); train_bars / test_bars are then only a minimum-data guard
+    test_days: int | None = None
+    step_days: int | None = None
+    allow_overnight: bool | None = None  # None = daily: carried positions allowed; intraday: NOT allowed (Saba's intraday-only policy). True must be said explicitly
+    intraday_costs: bool = True          # intraday: apply the per-instrument time-of-day spread, range-scaled slippage and financing (data/intraday_profiles.json)
 
     def __post_init__(self):
-        if self.fold_mode not in ("dates", "bars") or self.pooling not in ("active", "fixed") or self.cost_multiplier <= 0:
-            raise ValueError("fold_mode must be 'dates' or 'bars', pooling 'active' or 'fixed', cost_multiplier > 0")
+        if self.fold_mode not in ("dates", "bars", "days") or self.pooling not in ("active", "fixed") or self.cost_multiplier <= 0:
+            raise ValueError("fold_mode must be 'dates', 'bars' or 'days', pooling 'active' or 'fixed', cost_multiplier > 0")
+        intraday = is_intraday(self.interval)
+        if intraday and self.fold_mode != "days":
+            raise ValueError(f"interval {self.interval!r} is intraday: fold_mode 'dates' and 'bars' count weekdays / bars of a daily series. Use fold_mode 'days' with "
+                             "train_days and test_days (calendar days)")
+        if intraday and self.pooling != "active":
+            raise ValueError("intraday studies pool with pooling 'active' (equal weight over the markets that trade at each timestamp)")
+        if self.fold_mode == "days":
+            if not (isinstance(self.train_days, int) and isinstance(self.test_days, int) and self.train_days >= 5 and self.test_days >= 5):
+                raise ValueError("fold_mode 'days' needs integer train_days >= 5 and test_days >= 5 (calendar days)")
+            if self.step_days is not None and self.step_days < self.test_days:
+                raise ValueError("step_days must be >= test_days so that test windows never overlap")
+        elif self.train_days is not None or self.test_days is not None or self.step_days is not None:
+            raise ValueError("train_days / test_days / step_days belong to fold_mode 'days'")
+        if intraday and self.allow_overnight is None:
+            object.__setattr__(self, "allow_overnight", False)       # explicit in the recorded spec: the policy is part of the test, never implicit
         if self.start_date is not None:
             pd.Timestamp(self.start_date)
         if not self.name.strip() or not self.instruments or not self.grid:
@@ -110,8 +134,14 @@ class StudySpec:
             out.append(params)
         return out
 
+    _INTRADAY_DEFAULTS = {"train_days": None, "test_days": None, "step_days": None, "allow_overnight": None, "intraday_costs": True}
+
     def to_dict(self) -> dict:
-        return asdict(self)
+        d = asdict(self)
+        for k, v in self._INTRADAY_DEFAULTS.items():       # keep the record (and its hash) of every earlier daily study unchanged
+            if d.get(k) == v:
+                d.pop(k, None)
+        return d
 
     @staticmethod
     def from_dict(d: dict) -> "StudySpec":
@@ -131,14 +161,27 @@ def _init(payload):
     _G.update(payload)
 
 
-def _segment(res, capital, interval):
+def _key(ts, intraday: bool) -> str:
+    """Pooling key of a bar: the date for daily series (one bar per day), the full timestamp for intraday series."""
+    return ts.isoformat() if intraday else str(ts.date())
+
+
+def _segment(res, capital, interval, keep_series=True):
     m = compute_metrics(res, interval)
+    out = {"sharpe": m["sharpe_annualized"] or 0.0, "trades": m["trades"], "net_return_pct": m["net_return_pct"] or 0.0}
+    if not keep_series:          # training windows only feed parameter selection: no need to carry their series around
+        return out
     eq = res.equity["equity"].to_numpy(dtype=float)
     prev = np.concatenate([[capital], eq[:-1]])
     rets = np.where(prev > 0, eq / np.where(prev > 0, prev, 1) - 1, 0.0)
-    return {"sharpe": m["sharpe_annualized"] or 0.0, "trades": m["trades"], "net_return_pct": m["net_return_pct"] or 0.0,
-            "dates": [str(ts.date()) for ts in res.equity.index], "rets": [float(x) for x in rets],
-            "pnls": [float(t["net_pnl"]) for t in res.trades]}
+    intraday = is_intraday(interval)
+    out.update({"dates": [_key(ts, intraday) for ts in res.equity.index], "rets": [float(x) for x in rets], "pnls": [float(t["net_pnl"]) for t in res.trades]})
+    if intraday:
+        out["exits"] = dict(Counter(t["exit_reason"] for t in res.trades))
+        out["overnight"] = int(sum(1 for t in res.trades if t["entry_ts"].tz_convert("Europe/Stockholm").date() != t["exit_ts"].tz_convert("Europe/Stockholm").date()))
+        out["financing"] = float(sum(t.get("financing", 0.0) for t in res.trades))
+        out["cost_paid"] = float(sum(t["fees"] + t["spread_slippage_cost"] for t in res.trades))
+    return out
 
 
 def _eval_task(task):
@@ -150,7 +193,7 @@ def _eval_task(task):
         for f in _G["folds"][iid]:
             tr = Simulator(cfg).run(bars, build_strategy(_G["strategy"], params), trade_start=f["train_start"], trade_end=f["train_end"])
             te = Simulator(cfg).run(bars, build_strategy(_G["strategy"], params), trade_start=f["test_start"], trade_end=f["test_end"])
-            out["folds"].append({"fold": f["index"], "train": _segment(tr, cfg.capital, _G["interval"]), "test": _segment(te, cfg.capital, _G["interval"])})
+            out["folds"].append({"fold": f["index"], "train": _segment(tr, cfg.capital, _G["interval"], keep_series=False), "test": _segment(te, cfg.capital, _G["interval"])})
     except Exception as exc:       # a broken cell (e.g. sandbox violation) is excluded but still counts as a trial
         out["error"] = f"{type(exc).__name__}: {str(exc)[:240]}"
     return out
@@ -182,6 +225,26 @@ def _calendar_folds(dev: dict, spec) -> dict:
     return out
 
 
+def _time_folds(dev: dict, spec) -> dict:
+    """Folds for intraday series: windows in CALENDAR days on a common calendar, mapped to every market's bars by TIMESTAMP. As with date folds, a market takes
+    part in a fold only if its history covers the training and test window, so one market never lends later information to another."""
+    first = min(d.index[0].normalize() for d in dev.values()).tz_localize(None)
+    last = max(d.index[-1].normalize() for d in dev.values()).tz_localize(None)
+    ref = pd.date_range(first, last, freq="D").tz_localize("UTC")
+    rfolds = make_folds(len(ref), spec.train_days, spec.test_days, step=spec.step_days, embargo=spec.embargo, anchored=spec.anchored, min_len=5)
+    bound = lambda k: ref[k] if k < len(ref) else ref[-1] + pd.Timedelta(days=1)
+    out = {i: [] for i in dev}
+    for f in rfolds:
+        b_ts, b_te, b_xs, b_xe = bound(f.train_start), bound(f.train_end), bound(f.test_start), bound(f.test_end)
+        for i, d in dev.items():
+            its, ite, ixs, ixe = (int(d.index.searchsorted(b, side="left")) for b in (b_ts, b_te, b_xs, b_xe))
+            covers = (d.index[0] <= b_ts + 0.15 * (b_te - b_ts) and d.index[-1] >= b_xe - pd.Timedelta(days=3)
+                      and ite - its >= 20 and ixe - ixs >= 20)
+            if covers:
+                out[i].append({"index": f.index, "train_start": its, "train_end": ite, "test_start": ixs, "test_end": ixe})
+    return out
+
+
 def run_study(spec: StudySpec, bars_by_instrument: dict, dev_end: dict, *, workers: int = 1, quality: dict | None = None) -> dict:
     """bars_by_instrument: id -> DataFrame (full history); dev_end: id -> first index NOT usable (absolute, into the frame as given).
     Nothing at/after dev_end is passed on. Data before `start_date` / the usable-from date is clipped, glitch bars are removed (if clean_data)."""
@@ -190,7 +253,7 @@ def run_study(spec: StudySpec, bars_by_instrument: dict, dev_end: dict, *, worke
     for i in spec.instruments:
         full = bars_by_instrument[i].iloc[:dev_end[i]]
         lo_date = start
-        if spec.respect_usable_from and usable_from(i):
+        if spec.respect_usable_from and usable_from(i) and not is_intraday(spec.interval):      # usable-from dates describe the DAILY history
             uf = pd.Timestamp(usable_from(i), tz="UTC")
             lo_date = uf if lo_date is None else max(lo_date, uf)
         d = full if lo_date is None else full.loc[full.index >= lo_date]
@@ -198,7 +261,11 @@ def run_study(spec: StudySpec, bars_by_instrument: dict, dev_end: dict, *, worke
             d, rem = clean_bars(d)
             if rem:
                 removed[i] = rem
-        if len(d) < spec.train_bars + spec.test_bars:
+        if spec.fold_mode == "days":
+            if len(d) < 40 or (d.index[-1] - d.index[0]).days < spec.train_days + spec.test_days:
+                excluded[i] = f"history of {0 if len(d) < 2 else (d.index[-1] - d.index[0]).days} days (< train+test = {spec.train_days + spec.test_days})"
+                continue
+        elif len(d) < spec.train_bars + spec.test_bars:
             excluded[i] = f"only {len(d)} usable bars (< train+test = {spec.train_bars + spec.test_bars})"
             continue
         dev[i] = d
@@ -207,6 +274,8 @@ def run_study(spec: StudySpec, bars_by_instrument: dict, dev_end: dict, *, worke
     specs = {i: load_instrument(i) for i in dev}
     if spec.fold_mode == "dates":
         folds = _calendar_folds(dev, spec)
+    elif spec.fold_mode == "days":
+        folds = _time_folds(dev, spec)
     else:
         folds = {i: [vars(f) for f in make_folds(len(dev[i]), spec.train_bars, spec.test_bars, step=spec.step, embargo=spec.embargo, anchored=spec.anchored)] for i in dev}
     for i in list(dev):
@@ -218,8 +287,11 @@ def run_study(spec: StudySpec, bars_by_instrument: dict, dev_end: dict, *, worke
     ids = list(dev)
     cells = spec.cells()
     stress = StressModel(spread_multiplier=spec.cost_multiplier, slippage_multiplier=spec.cost_multiplier)
+    intraday = is_intraday(spec.interval)
+    rules = SessionRules.from_policy(interval_minutes(spec.interval)) if intraday and not spec.allow_overnight else None      # Saba's intraday-only policy
+    icosts = {i: (intraday_costs(i) if intraday and spec.intraday_costs else None) for i in ids}
     payload = {"bars": dev, "strategy": spec.strategy, "interval": spec.interval,
-               "cfgs": {i: SimConfig(spec.capital, None, None, instrument=specs[i], stress=stress).to_dict() for i in ids},
+               "cfgs": {i: SimConfig(spec.capital, None, None, instrument=specs[i], stress=stress, session=rules, intraday_costs=icosts[i]).to_dict() for i in ids},
                "folds": {i: folds[i] for i in ids}}
     tasks = [(c, p, i) for c, p in enumerate(cells) for i in ids]
     if workers > 1:
@@ -232,6 +304,10 @@ def run_study(spec: StudySpec, bars_by_instrument: dict, dev_end: dict, *, worke
     out["excluded_markets"] = excluded
     out["glitch_bars_removed"] = {i: [x["date"] for x in v] for i, v in removed.items()}
     out["data_quality"] = quality or {}
+    if intraday:
+        out["intraday"] = {"allow_overnight": bool(spec.allow_overnight), "session_policy": rules.to_dict() if rules else None,
+                           "cost_multiplier": spec.cost_multiplier,
+                           "cost_profiles": {i: (icosts[i].source if icosts[i] else "flat bps (no intraday profile)") for i in ids}}
     return out
 
 
@@ -240,6 +316,8 @@ def _aggregate(spec, cells, ids, specs, dev, folds, results):
     res = {(r["cell"], r["iid"]): r for r in results}
     valid = [c for c in range(len(cells)) if all("error" not in res[(c, i)] for i in ids)]
     errors = {c: next(res[(c, i)]["error"] for i in ids if "error" in res[(c, i)]) for c in range(len(cells)) if c not in valid}
+    if not valid:       # a study in which every cell crashed is a bug or a bad spec, never a "no evidence" result: do not record it
+        raise ValueError(f"every cell of the study failed; first error: {next(iter(errors.values()), 'unknown')}")
     bpy = float(np.mean([specs[i].bars_per_year(spec.interval) for i in ids]))     # legacy ("fixed" pooling); "active" pooling re-derives it from the dates below
     n_inst = len(ids)
     fixed = spec.pooling == "fixed"
@@ -321,7 +399,7 @@ def _aggregate(spec, cells, ids, specs, dev, folds, results):
     n_active = np.array([sum(1 for i in ids if d in active_days[i]) for d in w_dates], dtype=float)
     for i in ids:
         cl = dev[i]["Close"].pct_change().fillna(0.0)
-        cl.index = [str(t.date()) for t in cl.index]
+        cl.index = [_key(t, is_intraday(spec.interval)) for t in cl.index]
         bh += np.array([float(cl.get(d, 0.0)) if d in active_days[i] else 0.0 for d in w_dates]) / (n_inst if fixed else np.maximum(n_active, 1.0))
     exp_ci = bootstrap_mean_ci(wfo_pnls)
     folds_with_trades = [r for r in fold_rows if r.get("oos_return_pct") is not None]
@@ -340,6 +418,12 @@ def _aggregate(spec, cells, ids, specs, dev, folds, results):
              "grid_median_oos_sharpe_annualized": _f(float(np.median(cell_sr)) * math.sqrt(bpy), 3) if len(cell_sr) else None,
              "grid_share_positive_oos": _f(float((cell_sr > 0).mean()), 3) if len(cell_sr) else None,
              "expected_best_of_n_noise_sharpe_annualized": _f(expected_max_sharpe(var_sr, n_trials) * math.sqrt(bpy), 3)}
+    if is_intraday(spec.interval):
+        sel = [p for p in wfo_parts]
+        wfo["exit_reasons"] = dict(sum((Counter(p.get("exits", {})) for p in sel), Counter()))
+        wfo["trades_held_overnight"] = int(sum(p.get("overnight", 0) for p in sel))
+        wfo["financing_paid"] = _f(sum(p.get("financing", 0.0) for p in sel), 2)
+        wfo["spread_slippage_and_fees_paid"] = _f(sum(p.get("cost_paid", 0.0) for p in sel), 2)
     # verdict
     reasons = []
     if not (sr_w > 0):
@@ -388,7 +472,7 @@ def run_recorded_study(registry, archive, spec: StudySpec, *, workers: int = 1, 
         full = archive.read(s.symbol, spec.interval)
         bars[i] = full
         lo_date = pd.Timestamp(spec.start_date, tz="UTC") if spec.start_date else None
-        if spec.respect_usable_from and usable_from(i):
+        if spec.respect_usable_from and usable_from(i) and not is_intraday(spec.interval):
             uf = pd.Timestamp(usable_from(i), tz="UTC")
             lo_date = uf if lo_date is None else max(lo_date, uf)
         lo = 0 if lo_date is None else int(full.index.searchsorted(lo_date))
@@ -396,10 +480,20 @@ def run_recorded_study(registry, archive, spec: StudySpec, *, workers: int = 1, 
         # development end = 80 % of the ANALYSED window (or the consumed-test frontier); the remaining tail stays untouched
         dev_end[i] = lo + development_end(window, test_frontier(registry, s.symbol, spec.interval))
         analysed = clean_bars(full.iloc[lo:dev_end[i]])[0] if spec.clean_data else full.iloc[lo:dev_end[i]]
-        q = check_bars(analysed, interval=spec.interval, asset_class=s.asset_class, min_bars=spec.train_bars + spec.test_bars)
+        q = check_bars(analysed, interval=spec.interval, asset_class=s.asset_class, min_bars=100 if spec.fold_mode == "days" else spec.train_bars + spec.test_bars)
         quality[i] = {"status": q["status"], "bars": q["bars"], "first": q.get("first"), "last": q.get("last"), "findings": [f["message"] for f in q["findings"]]}
         if q["status"] == "fail":
             raise ValueError(f"data quality check failed for {i}: " + "; ".join(f["message"] for f in q["findings"] if f["level"] == "fail"))
+        if is_intraday(spec.interval):          # the series must match the market's session calendar (24/7, 24/5, Globex break, regular hours)
+            kind = session_kind(i)
+            if kind is None:
+                quality[i]["session"] = {"status": "unchecked", "note": "no session calendar for this instrument in data/intraday_profiles.json"}
+            else:
+                sq = check_session(analysed, kind, spec.interval)
+                quality[i]["session"] = {k: sq[k] for k in ("status", "kind", "completeness", "missing_expected_bars", "longest_missing_run_bars", "outside_session_bars")}
+                quality[i]["session"]["findings"] = [f["message"] for f in sq["findings"]]
+                if sq["status"] == "fail":
+                    raise ValueError(f"session check failed for {i}: " + "; ".join(f["message"] for f in sq["findings"]))
     dev_sha = {i: dataset_sha256(bars[i].iloc[:dev_end[i]]) for i in spec.instruments}
     study_sha = hashlib.sha256(json.dumps({"spec": spec.to_dict(), "dev": dev_sha, "code": code_version()}, sort_keys=True, default=str).encode()).hexdigest()
     for rid, cfg_json, res_json in registry.db.execute("SELECT id, configuration_json, results_json FROM experiments WHERE name='academy:study'"):

@@ -1,0 +1,25 @@
+{
+  "id": "BTCUSD_BITSTAMP",
+  "symbol": "BTCUSD-BITSTAMP",
+  "name": "Bitcoin / US dollar (Bitstamp exchange data)",
+  "asset_class": "crypto",
+  "quote_currency": "USD",
+  "tick_size": 0.01,
+  "min_quantity": 0.0001,
+  "quantity_step": 0.0001,
+  "costs": {
+    "fee_bps": 10.0,
+    "spread_bps": 5.0,
+    "slippage_bps": 5.0
+  },
+  "max_leverage": 2.0,
+  "broker_max_leverage_assumed": 2.0,
+  "maintenance_margin_fraction": 0.25,
+  "gap_stress_pct": 18.0,
+  "min_stop_pct": 0.85,
+  "trading_hours_per_day": 24.0,
+  "trading_days_per_year": 365,
+  "timezone": "UTC",
+  "sessions": "24/7",
+  "notes": "Same assumed trading terms as BTCUSD; the price series comes from Bitstamp's public API (true BTC/USD, UTC, 1m-1d) and is archived under the symbol BTCUSD-BITSTAMP in the separate intraday archive. Trades every day, so 'daily gaps' are weekend-free; exchange outages and extreme moves are possible; assumed retail fees (0.1 %). Broker terms unverified. gap_stress_pct = 1.25 x the worst overnight g"
+}

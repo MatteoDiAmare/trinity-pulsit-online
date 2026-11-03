@@ -21,9 +21,9 @@ class Fold:
     test_end: int
 
 
-def make_folds(dev_end: int, train_bars: int, test_bars: int, *, step: int | None = None, embargo: int = 0, anchored: bool = False) -> list[Fold]:
-    if min(train_bars, test_bars) < 20 or embargo < 0 or dev_end <= 0:
-        raise ValueError("train_bars and test_bars must be >= 20, embargo >= 0")
+def make_folds(dev_end: int, train_bars: int, test_bars: int, *, step: int | None = None, embargo: int = 0, anchored: bool = False, min_len: int = 20) -> list[Fold]:
+    if min(train_bars, test_bars) < min_len or embargo < 0 or dev_end <= 0:
+        raise ValueError(f"train and test windows must be >= {min_len}, embargo >= 0")
     step = step or test_bars
     if step < test_bars:
         raise ValueError("step must be >= test_bars so that test windows never overlap")
