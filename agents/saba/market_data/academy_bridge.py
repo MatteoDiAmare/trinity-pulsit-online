@@ -5,7 +5,9 @@ Invoke as a subprocess: one JSON object on stdin, one JSON object on stdout.
 Commands (a fixed allowlist; nothing is executed from the request, no shell, no file paths except
 `spec_file` names inside the strategies directory):
   status, start_cycle, finish_cycle, register_hypothesis, run_hypothesis, propose_next, variants,
-  add_lesson, search_lessons, verify_lesson, notebook, final_test, conclude_hypothesis, halt
+  add_lesson, search_lessons, verify_lesson, notebook, final_test, conclude_hypothesis, halt,
+  run_study, freeze_candidate, forward_report, test_strategy, refresh_data, help
+Every call (request, answer, outcome, duration) is also appended to a tamper-evident audit log on the data volume (academy/audit.py).
 `resume` is NOT available here: only the operator lifts a halt (academy_cli resume).
 Exit code 0 on success; 1 with {"ok": false, "error": ...} otherwise.
 """
@@ -13,15 +15,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import re
 import sys
+import time
+import warnings
 from pathlib import Path
 
 from memory.experience_store import ExperienceStore
 from .archive import MarketArchive
 from .laboratory import ExperimentRegistry
 from .academy.experiments import run_final_test
-from .academy.instruments import available_instruments
+from .academy.audit import AuditLog
+from .academy.instruments import available_instruments, load_instrument
 from .academy.ledger import LedgerStore, jsonable
 from .academy.memory import ResearchMemory
 from .academy.orchestrator import CycleDenied, Orchestrator, mutate_spec
@@ -37,7 +43,8 @@ USAGE = {
                             "experiments": [{"label": "a", "strategy": "sma_cross", "params": {"short": 10, "long": 30}},
                                             {"label": "b", "spec_file": "ema_trend.json"},
                                             {"label": "c", "code_file": "my_strategy.py", "params": {}}],
-                            "run_in_cycle": "<cycle_id: registers AND runs in one call>", "parent_id": "optional"},
+                            "run_in_cycle": "<cycle_id: registers AND runs in one call>", "parent_id": "optional",
+                            "study_only": "optional true: use experiments [] when run_study (with this hypothesis_id) is the evidence"},
     "run_hypothesis": {"command": "run_hypothesis", "cycle_id": 1, "hypothesis_id": 1},
     "add_lesson": {"command": "add_lesson", "hypothesis_id": 1, "claim": "text", "verdict": "refuted|candidate|inconclusive|supported",
                    "confidence": 0.5, "evidence": [{"experiment_id": 3}], "scope": {"market": "GOLD", "interval": "1d"},
@@ -51,14 +58,17 @@ USAGE = {
     "halt": {"command": "halt", "reason": "text"},
     "run_study": {"command": "run_study", "cycle_id": 1, "study": {"name": "sma grid", "strategy": "sma_cross", "base_params": {"stop_loss_pct": 2.0},
                   "grid": {"short": [5, 10, 20], "long": [40, 80, 150]}, "instruments": ["GOLD", "EURUSD", "SP500"], "interval": "1d",
-                  "train_bars": 750, "test_bars": 125, "code_file": "optional: your own strategy file instead of strategy/base_params (grid paths then start with params.)"}, "workers": 2},
+                  "train_bars": 750, "test_bars": 125, "code_file": "optional: your own strategy file instead of strategy/base_params (grid paths then start with params.)"},
+                  "workers": 2, "hypothesis_id": "optional: link the study to this hypothesis (no extra trials are charged to it)"},
     "freeze_candidate": {"command": "freeze_candidate", "label": "sma 10/40 on 3 markets", "strategy": "sma_cross", "params": {"short": 10, "long": 40, "stop_loss_pct": 2.0},
                          "instruments": ["GOLD", "EURUSD", "SP500"], "interval": "1d",
                          "forecast": {"p_positive": 0.45, "expected_hit_rate": 0.42, "expected_expectancy": 0.5}, "rules": {"min_trades": 30, "min_days": 60},
-                         "study_sha256": "optional"},
+                         "study_registry_id": "registry_id of the study this plan comes from. Only a study with verdict 'candidate' makes the entry a qualified candidate; "
+                                              "without it (or after no_evidence) it is stored as purpose 'calibration': followed only to score your forecasts"},
     "forward_report": {"command": "forward_report", "update": True, "fetch": False},
+    "refresh_data": {"command": "refresh_data"},
 }
-COMMANDS = ("run_study", "freeze_candidate", "forward_report", "help", "test_strategy", "status", "start_cycle", "finish_cycle", "register_hypothesis", "run_hypothesis", "propose_next", "variants",
+COMMANDS = ("refresh_data", "run_study", "freeze_candidate", "forward_report", "help", "test_strategy", "status", "start_cycle", "finish_cycle", "register_hypothesis", "run_hypothesis", "propose_next", "variants",
             "add_lesson", "search_lessons", "verify_lesson", "notebook", "final_test", "conclude_hypothesis", "halt")
 
 
@@ -126,7 +136,75 @@ def _experiment(item, strategies_dir) -> dict:
     return {"strategy": name, "params": item.get("params") or {}, "label": item["label"]}
 
 
-def handle(req: dict, *, root, strategies_dir, owner_id="local", org_id="personal") -> dict:
+def _has_data(archive, instrument_id, interval) -> bool:
+    try:
+        archive.read(load_instrument(instrument_id).symbol, interval)
+        return True
+    except FileNotFoundError:
+        return False
+
+
+def _study_guidance(out: dict) -> str:
+    v = out.get("verdict")
+    if v == "candidate":
+        return ("verdict 'candidate': every pre-registered criterion was met. Record it as a lesson with verdict 'candidate' (never 'supported') and freeze it "
+                "with study_registry_id so that it is followed forward; remember that selection bias remains.")
+    return ("verdict 'no_evidence': the search found nothing it could tell from luck. That is absence of evidence, not proof of absence. Record the lesson "
+            "as 'inconclusive' and state what this study could and could not detect (markets, years, trades); 'refuted' is refused for a no_evidence study. "
+            "If you still freeze a plan to score your own forecast, it is stored as purpose 'calibration', not as a candidate.")
+
+
+def _freeze_purpose(registry, req: dict, item: dict):
+    """A frozen plan is a qualified `candidate` only when it comes from a registered study with verdict 'candidate' and is one of that study's cells."""
+    rid = req.get("study_registry_id")
+    wanted = req.get("purpose")
+    if wanted not in (None, "candidate", "calibration"):
+        raise ValueError("purpose must be 'candidate' or 'calibration' (it is derived from study_registry_id; you normally omit it)")
+    if rid is None:
+        if wanted == "candidate":
+            raise ValueError("purpose 'candidate' needs study_registry_id: the registry id of a study with verdict 'candidate'")
+        return "calibration", req.get("study_sha256"), " | calibration: no qualifying study linked"
+    if not isinstance(rid, int) or isinstance(rid, bool):
+        raise ValueError("study_registry_id must be an integer")
+    row = registry.db.execute("SELECT name, configuration_json, results_json FROM experiments WHERE id=?", (rid,)).fetchone()
+    if row is None or row[0] != "academy:study":
+        raise ValueError(f"study_registry_id {rid} is not a study in the registry")
+    cfg, res = json.loads(row[1]), json.loads(row[2])
+    if wanted == "calibration" or res.get("verdict") != "candidate":
+        if wanted == "candidate":
+            raise ValueError(f"study {rid} has verdict '{res.get('verdict')}', not 'candidate': it cannot make a qualified candidate")
+        return "calibration", res.get("study_sha256"), f" | calibration: study {rid} verdict {res.get('verdict')}"
+    sp = cfg["spec"]
+    if item["strategy"] != sp.get("strategy"):
+        raise ValueError(f"the plan's strategy {item['strategy']!r} is not the study's ({sp.get('strategy')!r})")
+    if not set(req.get("instruments") or []) <= set(sp["instruments"]) or not req.get("instruments"):
+        raise ValueError(f"instruments must be a non-empty subset of the study's {sp['instruments']}")
+    if item["strategy"] != "sandboxed":
+        base, grid, params = sp.get("base_params") or {}, sp.get("grid") or {}, item["params"]
+        bad = [k for k, v in base.items() if k not in grid and params.get(k) != v] + [k for k, vals in grid.items() if params.get(k) not in vals]
+        if bad:
+            raise ValueError(f"parameters {bad} are not one of the study's cells")
+    return "candidate", res.get("study_sha256"), f" | candidate: study {rid}"
+
+
+def _refresh_data(archive, study_archive) -> dict:
+    """Append the latest daily bars (Yahoo Finance, free) to the archives that already hold each instrument. Never replaces history."""
+    out = {}
+    for iid, spec in sorted(available_instruments().items()):
+        entry = {}
+        for label, arc in (("standard", archive), ("extended", study_archive if study_archive is not archive else None)):
+            if arc is None or not _has_data(arc, iid, "1d"):
+                continue
+            try:
+                info = arc.ingest(spec.symbol, "1d", period="1mo")
+                entry[label] = {"last_bar": info["last_timestamp_utc"][:10], "bars": info["row_count"]}
+            except Exception as exc:                  # network problems must not fail the call; report them
+                entry[label] = {"error": str(exc)[:160]}
+        out[iid] = entry
+    return {"refreshed": out, "source": "Yahoo Finance via yfinance (free, daily)"}
+
+
+def handle(req: dict, *, root, strategies_dir, owner_id="local", org_id="personal", extended_root=None) -> dict:
     if not isinstance(req, dict) or req.get("command") not in COMMANDS:
         raise ValueError(f"command must be one of {COMMANDS}")
     cmd = req["command"]
@@ -135,6 +213,10 @@ def handle(req: dict, *, root, strategies_dir, owner_id="local", org_id="persona
     registry = ExperimentRegistry(Path(archive.root) / "experiments.sqlite3")
     journal = ExperienceStore(str(Path(archive.root) / "academy_events.sqlite3"))
     memory = ResearchMemory(Path(archive.root) / "academy_memory.sqlite3", journal=journal)
+    # Studies read the extended (longer-history) archive when it exists; the standard archive stays untouched so earlier experiments, splits and
+    # forward candidates keep reproducing exactly. Both are refreshed by `refresh_data`.
+    ext = Path(extended_root).expanduser() if extended_root else Path(archive.root).parent / "market_data_extended"
+    study_archive = MarketArchive(ext) if ext.is_dir() else archive
     ledger = LedgerStore(archive.root, owner_id, org_id)
     orch = Orchestrator(archive.root, registry, archive, memory, ledger)
     sdir = Path(strategies_dir)
@@ -149,21 +231,44 @@ def handle(req: dict, *, root, strategies_dir, owner_id="local", org_id="persona
                 code_params = _load_code({"code_file": study.pop("code_file"), "params": study.get("base_params", {})}, sdir)
                 study["strategy"], study["base_params"] = "sandboxed", code_params
             spec = StudySpec.from_dict(study)
-            orch.charge(_int(req, "cycle_id"), 1)
-            out = run_recorded_study(registry, archive, spec, workers=min(max(int(req.get("workers", 1)), 1), 2))
+            cycle_id = _int(req, "cycle_id")
+            hid = _int(req, "hypothesis_id", optional=True)
+            if hid is not None:
+                hyp = memory.hypothesis(hid)
+                if hyp is None:
+                    raise ValueError("unknown hypothesis_id")
+                if hyp["status"] not in ("open", "testing"):
+                    raise ValueError(f"hypothesis {hid} is {hyp['status']}; register a new (child) hypothesis instead")
+            # the cycle budget is charged once, and only when the study is really computed: an identical study is returned from the registry
+            out = run_recorded_study(registry, study_archive, spec, workers=min(max(int(req.get("workers", 1)), 1), 2),
+                                     before_run=lambda: orch.charge(cycle_id, 1))
             out["cell_table"] = sorted([c for c in out["cell_table"] if c.get("valid")], key=lambda c: -(c.get("oos_sharpe_annualized") or -9))[:8]
+            out["data_archive"] = "extended" if study_archive is not archive else "standard"
+            if hid is not None:
+                # evidence link only (idempotent). The study's cells are counted once, in the global trial index; the hypothesis' own
+                # trial budget is deliberately NOT charged, so nothing is counted twice.
+                memory.link_experiments(hid, [out["registry_id"]])
+                if memory.hypothesis(hid)["status"] == "open":
+                    memory.set_status(hid, "testing")
+                out["hypothesis_id"] = hid
+            out["how_to_record"] = _study_guidance(out)
             return {"ok": True, **out}
         if cmd == "freeze_candidate":
             from .academy.forward import ForwardTracker
             item = _experiment({"label": _str(req, "label", maxlen=120), **{k: req[k] for k in ("strategy", "params", "spec", "spec_file", "code", "code_file", "seed", "limits") if k in req}}, sdir)
+            purpose, study_sha, note = _freeze_purpose(registry, req, item)
             tr = ForwardTracker(Path(archive.root) / "academy_memory.sqlite3")
             try:
-                fid = tr.freeze(archive, label=item["label"], strategy=item["strategy"], params=item["params"], instruments=req.get("instruments") or [],
-                                interval=req.get("interval", "1d"), forecast=req.get("forecast"), rules=req.get("rules"), study_sha256=req.get("study_sha256"),
-                                note=str(req.get("note", ""))[:300])
+                fid = tr.freeze(archive, label=item["label"],
+                                strategy=item["strategy"], params=item["params"], instruments=req.get("instruments") or [],
+                                interval=req.get("interval", "1d"), forecast=req.get("forecast"), rules=req.get("rules"), study_sha256=study_sha,
+                                note=(str(req.get("note", ""))[:200] + note)[:400], purpose=purpose)
             finally:
                 tr.close()
-            return {"ok": True, "frozen_id": fid, "note": "the plan, data cutoff, rules and your forecast are now immutable"}
+            msg = ("qualified candidate: the linked study met every candidate criterion" if purpose == "candidate" else
+                   "stored for forecast CALIBRATION only: it did not come from a study with verdict 'candidate', so it is not a candidate "
+                   "(it is followed so that your forecast can be scored)")
+            return {"ok": True, "frozen_id": fid, "purpose": purpose, "meaning": msg, "note": "the plan, data cutoff, rules and your forecast are now immutable"}
         if cmd == "forward_report":
             from .academy.forward import ForwardTracker
             tr = ForwardTracker(Path(archive.root) / "academy_memory.sqlite3")
@@ -172,6 +277,8 @@ def handle(req: dict, *, root, strategies_dir, owner_id="local", org_id="persona
                 return {"ok": True, "snapshots": snaps, "forecast_report": tr.forecast_report()}
             finally:
                 tr.close()
+        if cmd == "refresh_data":
+            return {"ok": True, **_refresh_data(archive, study_archive)}
         if cmd == "help":
             return {"ok": True, "commands": USAGE, "tips": "start_cycle returns a briefing (status, notebook, ranking). Combine steps: "
                     "register_hypothesis with run_in_cycle runs it at once; add_lesson with conclude_hypothesis closes the hypothesis. "
@@ -199,7 +306,8 @@ def handle(req: dict, *, root, strategies_dir, owner_id="local", org_id="persona
                 out["train"] = evaluate_segment(train, exp, cfg, 0, split.train_end, interval)
             return out
         if cmd == "status":
-            return {"ok": True, **orch.status(), "test_windows_consumed_until": orch.test_windows(), "instruments": sorted(available_instruments())}
+            return {"ok": True, **orch.status(), "test_windows_consumed_until": orch.test_windows(), "instruments": sorted(available_instruments()),
+                    "study_data": "extended (long history)" if study_archive is not archive else "standard"}
         if cmd == "start_cycle":
             started = orch.start_cycle()
             status = {**orch.status(), "test_windows_consumed_until": orch.test_windows()}
@@ -210,8 +318,11 @@ def handle(req: dict, *, root, strategies_dir, owner_id="local", org_id="persona
             return {"ok": True, **orch.finish_cycle(_int(req, "cycle_id"))}
         if cmd == "register_hypothesis":
             exps = req.get("experiments")
-            if not isinstance(exps, list) or not exps:
-                raise ValueError("experiments must be a non-empty list")
+            study_only = req.get("study_only") is True
+            if not isinstance(exps, list) or (not exps and not study_only):
+                raise ValueError("experiments must be a non-empty list (or [] together with study_only: true when run_study is the evidence)")
+            if exps and study_only:
+                raise ValueError("study_only hypotheses have no experiments of their own: use experiments [] or drop study_only")
             labels = [e.get("label") if isinstance(e, dict) else None for e in exps]
             if len(set(labels)) != len(labels):
                 raise ValueError("experiment labels must be unique")
@@ -219,11 +330,19 @@ def handle(req: dict, *, root, strategies_dir, owner_id="local", org_id="persona
             if not isinstance(instruments, list) or not set(instruments) <= set(available_instruments()) or not instruments:
                 raise ValueError(f"instruments must be a non-empty subset of {sorted(available_instruments())}")
             plan = {"experiments": [_experiment(e, sdir) for e in exps], "instruments": instruments, "interval": req.get("interval", "1d")}
+            if study_only:
+                plan["study_only"] = True
+            else:                       # run_hypothesis reads the standard archive: refuse instruments it does not hold instead of failing mid-run
+                missing = [i for i in instruments if not _has_data(archive, i, plan["interval"])]
+                if missing:
+                    raise ValueError(f"no archived {plan['interval']} data in the standard archive for {missing}; use run_study (extended data) for these")
             hid = memory.register_hypothesis(_str(req, "statement"), _str(req, "family", maxlen=80), _int(req, "trial_budget"), plan,
                                              _int(req, "parent_id", optional=True))
-            out = {"ok": True, "hypothesis_id": hid, "cells": len(plan["experiments"]) * len(instruments),
+            out = {"ok": True, "hypothesis_id": hid, "cells": len(plan["experiments"]) * len(instruments), "study_only": study_only,
                    "preregistered_sha256": memory.hypothesis(hid)["preregistered_sha256"]}
-            if req.get("run_in_cycle") is not None:
+            if req.get("run_in_cycle") is not None and study_only:
+                out["run_error"] = "study_only hypothesis: nothing to run here; call run_study with this hypothesis_id"
+            elif req.get("run_in_cycle") is not None:
                 try:
                     out["run"] = orch.run_hypothesis(_int(req, "run_in_cycle"), hid)
                 except (ValueError, CycleDenied) as exc:        # registration stands; the run can be retried or the plan dropped
@@ -285,25 +404,42 @@ def handle(req: dict, *, root, strategies_dir, owner_id="local", org_id="persona
 
 
 def main(argv=None) -> int:
+    warnings.filterwarnings("ignore")                       # yfinance deprecation notices must not pollute the JSON channel
+    logging.getLogger("yfinance").setLevel(logging.CRITICAL)
     p = argparse.ArgumentParser(description="Saba Academy research bridge (no orders)")
     p.add_argument("--root", required=True, help="Persistent data volume (archive root)")
     p.add_argument("--strategies-dir", default="strategies")
     p.add_argument("--owner-id", default="local")
     p.add_argument("--org-id", default="personal")
+    p.add_argument("--extended-root", default=None, help="Long-history archive used by studies (default: <root>/../market_data_extended if it exists)")
     args = p.parse_args(argv)
+    started = time.monotonic()
+    request, req_cmd, rc = None, None, 1
     try:
         request = json.load(sys.stdin)
         req_cmd = request.get("command") if isinstance(request, dict) else None
-        out = handle(request, root=args.root, strategies_dir=args.strategies_dir, owner_id=args.owner_id, org_id=args.org_id)
-        print(json.dumps(jsonable(out), allow_nan=False))
-        return 0
+        out = handle(request, root=args.root, strategies_dir=args.strategies_dir, owner_id=args.owner_id, org_id=args.org_id, extended_root=args.extended_root)
+        reply, rc = jsonable(out), 0
+        print(json.dumps(reply, allow_nan=False))
     except (ValueError, TypeError, KeyError, OSError, CycleDenied, json.JSONDecodeError, FileNotFoundError) as exc:
         reply = {"ok": False, "error": str(exc), "execution": "DISABLED"}
-        cmd = locals().get("req_cmd")
-        if cmd in USAGE:
-            reply["usage"] = USAGE[cmd]            # exact shape, so the caller does not have to guess field names
+        if req_cmd in USAGE:
+            reply["usage"] = USAGE[req_cmd]            # exact shape, so the caller does not have to guess field names
         print(json.dumps(reply))
-        return 1
+    _audit(args.root, req_cmd, request, reply if "reply" in locals() else {"ok": False, "error": "no reply"}, rc == 0, started)
+    return rc
+
+
+def _audit(root, command, request, reply, ok, started):
+    """Append this call to the durable audit log. Failure to record is reported on stderr and never changes the reply."""
+    try:
+        log = AuditLog(Path(MarketArchive(root).root) / "academy_audit.sqlite3")
+        try:
+            log.append(command=command, request=request, response=reply, ok=ok, duration_ms=int((time.monotonic() - started) * 1000))
+        finally:
+            log.close()
+    except Exception as exc:                               # pragma: no cover - last-resort safety
+        print(f"audit log not written: {exc}", file=sys.stderr)
 
 
 if __name__ == "__main__":

@@ -40,6 +40,14 @@ def main(argv=None):
     fu = sub.add_parser("forward-update", help="Re-evaluate every frozen candidate on the bars that arrived after its cutoff")
     fu.add_argument("--fetch", action="store_true", help="refresh the archive from the data provider first (network)")
     sub.add_parser("forward-report", help="Frozen candidates, their latest snapshot and the scoring of Saba's forecasts")
+    au = sub.add_parser("audit", help="Verify the tamper-evident audit log of bridge calls; optionally show the latest entries or export them")
+    au.add_argument("--tail", type=int, default=0, help="also print the last N calls (request/answer shortened)")
+    au.add_argument("--export", help="write the full log as JSON lines to this file (for archiving outside the data volume)")
+    cl = sub.add_parser("correct-lesson", help="Operator only: correct a lesson's verdict. The original is kept and marked superseded; evidence is unchanged")
+    cl.add_argument("--lesson-id", type=int, required=True)
+    cl.add_argument("--verdict", required=True, choices=["candidate", "inconclusive", "refuted"])
+    cl.add_argument("--reason", required=True)
+    cl.add_argument("--confidence", type=float, default=None)
     sub.add_parser("resume", help="Operator only: lift a halt set by Saba or by the operator")
     sub.add_parser("halt", help="Stop all new research cycles").add_argument("--reason", required=True)
     for name in ("train", "train-specs", "compare", "final-test", "export"):
@@ -94,6 +102,30 @@ def main(argv=None):
             out = export_all(ledger, args.out or Path(archive.root) / "academy_export",
                              include_abstentions=args.include_abstentions, allow_in_repo=args.allow_in_repo)
             print(json.dumps(out, indent=2))
+            return 0
+        if args.command == "audit":
+            from .academy.audit import AuditLog
+            log = AuditLog(Path(archive.root) / "academy_audit.sqlite3")
+            try:
+                out = {"verify": log.verify()}
+                if args.tail:
+                    out["last_calls"] = [{"id": r["id"], "ts": r["ts"], "command": r["command"], "ok": bool(r["ok"]), "error": r["error"],
+                                          "request": r["request_json"][:300], "answer": r["response_json"][:300]}
+                                         for r in log.entries(limit=10_000)[-args.tail:]]
+                if args.export:
+                    out["exported"] = log.export_jsonl(args.export)
+            finally:
+                log.close()
+            print(json.dumps(out, indent=1))
+            return 0 if out["verify"]["ok"] else 1
+        if args.command == "correct-lesson":
+            from .academy.memory import ResearchMemory
+            mem = ResearchMemory(Path(archive.root) / "academy_memory.sqlite3")
+            try:
+                new = mem.correct_lesson(registry, args.lesson_id, verdict=args.verdict, reason=args.reason, confidence=args.confidence)
+                print(json.dumps({"corrected": args.lesson_id, "new_lesson_id": new, "original": "kept, marked superseded"}, indent=1))
+            finally:
+                mem.close()
             return 0
         if args.command == "report":
             from .academy.report import build_report, render_markdown

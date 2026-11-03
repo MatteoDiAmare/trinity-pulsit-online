@@ -375,9 +375,11 @@ def _aggregate(spec, cells, ids, specs, dev, folds, results):
 
 
 # ---------------------------------------------------------------- registry integration
-def run_recorded_study(registry, archive, spec: StudySpec, *, workers: int = 1) -> dict:
+def run_recorded_study(registry, archive, spec: StudySpec, *, workers: int = 1, before_run=None) -> dict:
     """Loads archived bars, respects every market's consumed-test frontier / protected tail, deduplicates, runs and records the study.
-    Trials already spent on these markets (the largest per-market count) raise the deflation hurdle, and every cell of the study is added to the trial counts."""
+    Trials already spent on these markets (the largest per-market count) raise the deflation hurdle, and every cell of the study is added to the trial counts.
+    `before_run` (optional callable) is invoked only when the study will really be computed and recorded, never for a reused (identical) study,
+    so that budgets are charged once per new piece of research."""
     from .integrity import SpecIndex, code_version, dataset_sha256, market_key, test_frontier
     from .walkforward import development_end
     bars, dev_end, quality = {}, {}, {}
@@ -403,6 +405,8 @@ def run_recorded_study(registry, archive, spec: StudySpec, *, workers: int = 1) 
     for rid, cfg_json, res_json in registry.db.execute("SELECT id, configuration_json, results_json FROM experiments WHERE name='academy:study'"):
         if json.loads(cfg_json).get("study_sha256") == study_sha:
             return {**json.loads(res_json), "reused": True, "registry_id": rid}
+    if before_run is not None:
+        before_run()
     index = SpecIndex(registry)
     markets = {i: market_key(load_instrument(i).symbol, spec.interval) for i in spec.instruments}
     # one pooled series per cell: trials already spent on the markets raise the hurdle by the largest per-market count (not their sum)
