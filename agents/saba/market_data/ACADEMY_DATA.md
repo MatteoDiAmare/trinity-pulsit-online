@@ -60,3 +60,18 @@ vinst per affär krymper 4–8×.
 - Ej installerat i Sabas container; sker först efter verifierad testcykel och efter godkännande.
 
 Reproduktion: `integration/run_breadth_experiments.py`, `integration/analyze_breadth.py`.
+
+## 8. Installation i Sabas miljö (2026-11-03)
+- Kod: commit `952f942c` driftsatt med `integration/deploy_academy_to_container.sh` (endast `~/.local/share/saba`, ingen omstart av containern).
+- Data: det långa historikarkivet kopierades som ett **nytt** arkiv `market_data_extended` (16 instrument, sha256 över alla parquet-filer
+  identiskt med det arkiv som gav de redovisade resultaten). Standardarkivet fick endast de 13 nya symbolerna; GC=F, EURUSD=X och ES=F
+  rördes inte. Studier läser det utökade arkivet; `run_hypothesis`, slutprov och framåtföljning läser standardarkivet, så tidigare
+  experiment, delningar och frysta kandidater reproduceras exakt. Det utökade arkivet är en överordnad version av standardarkivet för de tre
+  ursprungliga (alla gemensamma stängningskurser identiska).
+- Underhåll: `refresh_data` lägger till avslutade dagsstaplar (dagens ofullständiga stapel utelämnas) och redovisar staplar som
+  leverantören skickat men som valideringen avvisat (t.ex. Low över Close). Gratis FX-data har sådana enstaka staplar; de lämnar ett
+  endagsgap som kvalitetskontrollen tolererar.
+- Kvalitet i containern: alla 16 instrument klarar kontrollen (pass/warn, inga fail).
+- Historik: före/efter-jämförelse rad för rad av register, spec-index, hypoteser, länkar, cykler, frysta, uppföljningslogg och händelselogg:
+  0 ändrade rader. Enda ändringen är avsiktlig: L20 är markerad som ersatt av L21 (verdict `inconclusive`, identiskt bevis).
+- Körtid: en studie över 16 marknader tar ca 4–5 minuter (3 marknader ca 1 minut). Verktygsanropet måste därför ha `timeout` 600000.
