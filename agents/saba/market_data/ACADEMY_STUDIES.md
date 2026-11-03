@@ -57,3 +57,19 @@ Buy-and-hold on the same dates: Sharpe 0.92. The best single SMA cell (optimisti
 * Equal-weight pooling ignores correlation between markets; PBO and DSR assume the pooled return series is the unit of selection.
 * Forward tracking needs weeks of daily bars for a verdict; intraday would be faster but needs deeper free intraday data than the provider offers.
 * The study is not yet installed in Saba's container and the `/academy-cycle` text does not yet mention `run_study`; this is intentional until the results are reviewed.
+
+## Styrning av studieresultat (tillägg)
+- **`no_evidence` är inte `refuted`.** Ett studieutfall utan bevis är frånvaro av bevis, inte bevis på frånvaro (särskilt vid låg statistisk
+  styrka). `add_lesson` med verdict `refuted` avvisas om allt bevismaterial är studier med verdict `no_evidence`; använd `inconclusive`.
+  `refuted` kräver negativ validering/slutprov. Äldre felaktiga lärdomar rättas med `academy_cli correct-lesson` (originalet bevaras).
+- **Studie som hypotesbevis utan dubbelräkning.** `register_hypothesis` med `"experiments": []` och `"study_only": true`; `run_study` med
+  `hypothesis_id` länkar studien (idempotent) men debiterar inte hypotesens försöksbudget – studiens celler räknas en gång i det globala
+  försöksindexet. En identisk studie återanvänds från registret och debiterar varken cykelbudgeten eller länkar om. Ogiltiga studier
+  debiteras inte.
+- **Kandidat vs kalibrering.** En frusen plan är `candidate` bara om den hör till en registrerad studie med verdict `candidate`
+  (`study_registry_id`, en av studiens celler, delmängd av dess marknader). Annars lagras den som `calibration`: den följs enbart för att
+  poängsätta Sabas prognoser och räknas aldrig som kandidat. `forward_report` redovisar `qualified_candidates` och `calibration_only`
+  separat. Äldre frysta rader (före kolumnen) blir `calibration`; planen och dess hash är oförändrade.
+- **Dataunderhåll.** `refresh_data` lägger till de senaste dagsstaplarna (gratis) i de arkiv som redan innehåller instrumentet, utan att
+  ersätta historik. Studier läser det utökade arkivet `market_data_extended` (lång historik); `run_hypothesis`, slutprov och framåtföljning
+  läser standardarkivet så att tidigare resultat förblir reproducerbara.

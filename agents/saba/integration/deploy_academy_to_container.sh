@@ -5,6 +5,8 @@
 #   stamps ACADEMY_CODE_VERSION with the commit, creates a venv on the volume and installs pyarrow/yfinance.
 # - Touches only /home/developer/.local/share/saba (volume-backed, git-ignored there). Idempotent.
 # - Uses `docker cp`/`docker exec` only; no credentials are read or passed.
+# - Data is NOT touched here. The long-history archive for studies lives next to market_data as `market_data_extended` (auto-detected by the
+#   bridge); see market_data/ACADEMY_DATA.md for the one-time copy.
 set -euo pipefail
 CONTAINER="${1:-agent-saba}"
 REF="${2:-HEAD}"

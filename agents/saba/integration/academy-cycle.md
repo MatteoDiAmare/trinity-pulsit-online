@@ -22,8 +22,9 @@ Procedure
    dead ends and which test windows are already consumed. Read it before choosing what to do.
 2. `start_cycle`. If denied (halt or cycle budget), end the turn and say so. Do not retry.
 3. Decide what to learn (start from `forward_report` for frozen candidates and from your notebook). Use `search_lessons` and `propose_next`; do not repeat dead ends without a new reason. Ideas can be a JSON
-   strategy (`strategies/*.json`), a variant (`variants`), your own Python strategy (see below), another instrument (GOLD, EURUSD,
-   SP500) or a comparison across instruments.
+   strategy (`strategies/*.json`), a variant (`variants`), your own Python strategy (see below), another instrument (16 are available, see
+   `status`; GOLD, EURUSD, SP500 plus index, energy, metals, agriculture, rates, more FX pairs and BTC) or a comparison across instruments.
+   `run_hypothesis` works on the standard archive; studies read the longer-history archive (up to 25 years), see below.
 4. `register_hypothesis` BEFORE running: statement, family, `trial_budget`, instruments, interval and the exact experiments. The plan is
    hashed; `run_hypothesis` executes exactly that plan. A new idea is a new (child) hypothesis.
 5. `run_hypothesis` (stays within the cycle's experiment budget). Read `analysis`: it suggests confirm / vary / drop, nothing more.
@@ -37,15 +38,22 @@ Procedure
 Studies, walk-forward, frozen candidates and your own forecasts (new)
 - Prefer a STUDY to hand-made variants. One pre-registered grid (at most 60 cells; each combination of parameters is a cell) is evaluated as ONE piece of research:
   walk-forward over rolling windows, on all the markets you list, with the parameters of each window chosen from its training part only and tested on the unseen part after it.
-  Send `{"command": "run_study", "cycle_id": N, "study": {...}}` (see `help` for the exact JSON; typical daily geometry: `train_bars` 750, `test_bars` 125; use GOLD, EURUSD, SP500 unless you
-  have a reason not to). A study costs ONE experiment of the cycle budget and takes about a minute. For your own code use `"code_file": "name.py"` and grid paths that start with `params.`.
+  Send `{"command": "run_study", "cycle_id": N, "study": {...}}` (see `help` for the exact JSON; typical daily geometry: `train_bars` 750, `test_bars` 125). A study costs ONE experiment of the
+  cycle budget and takes about a minute; an identical study is returned from the registry and costs nothing. Add `"hypothesis_id": H` to link the study to a hypothesis as evidence (no
+  trials are charged to the hypothesis; the study's cells are counted once in the global trial index). If the study is the whole evidence, register the hypothesis with `"experiments": []`
+  and `"study_only": true`.
+  More markets and longer history make a study far more sensitive: with 3 markets only a true per-market Sharpe above ~1.8 could be detected, with 16 markets and full history about 0.3.
+  Prefer many markets (but they are correlated: equity indices move together, FX pairs share the dollar). Data is clipped to each market's usable start automatically and glitch bars are
+  removed in a cleaned view; the result lists `data_quality`, `glitch_bars_removed` and `excluded_markets`. `refresh_data` appends the latest daily bars (run it at the start of a cycle). For your own code use `"code_file": "name.py"` and grid paths that start with `params.`.
 - Read the result honestly. `wfo` is the out-of-sample evidence of the whole search procedure; `dsr` is the probability that it beats what the best of N zero-edge trials would reach (N includes
-  earlier trials on the same markets); `pbo` is the probability of backtest overfitting; compare with `benchmarks.buy_and_hold_*`. Verdict `no_evidence` is a valid and valuable result: record it as a
-  lesson with the study's `registry_id` as evidence. Verdict `candidate` only means worth freezing and tracking forward, not proven. With three markets and a few years of out-of-sample days only
+  earlier trials on the same markets); `pbo` is the probability of backtest overfitting; compare with `benchmarks.buy_and_hold_*`. Verdict `no_evidence` is a valid and valuable result, but it is ABSENCE of evidence, not proof of absence: record it as a
+  lesson with verdict `inconclusive` (the bridge REFUSES `refuted` for a no_evidence study) and say what the study could and could not detect (markets, years, trades). `refuted` needs negative
+  validation or final-test evidence. Cite the study's `registry_id` as evidence. Verdict `candidate` only means worth freezing and tracking forward, not proven. With three markets and a few years of out-of-sample days only
   fairly strong effects can be detected; do not loosen the criteria or re-run the same idea with tweaked grids hoping for a pass (each cell is counted).
-- To follow a candidate on new data, `freeze_candidate` (plan, markets, interval, optional `study_sha256`, rules `min_trades`/`min_days`) with YOUR FORECAST: `p_positive` (your probability that the
+- To follow a plan on new data, `freeze_candidate` (plan, markets, interval, `study_registry_id`, rules `min_trades`/`min_days`) with YOUR FORECAST: `p_positive` (your probability that the
   forward expectancy per trade is positive), `expected_hit_rate`, `expected_expectancy`. Be calibrated, not hopeful: forecasts are scored (Brier score against a coin flip) and are the measure of whether your
-  judgement improves. A frozen plan cannot be edited. `forward_report` re-evaluates every frozen candidate on bars that arrived after its cutoff and shows verdicts and your forecast score; verdicts need
+  judgement improves. A frozen plan cannot be edited. Only a plan taken from a study with verdict `candidate` (one of its cells, via `study_registry_id`) is stored as a qualified CANDIDATE;
+  anything else (including a plan from a no_evidence study) is stored as purpose `calibration`: it is followed only so that your forecast can be scored, and it never counts as a candidate, whatever its forward result. Say which one you are doing in your report. `forward_report` re-evaluates every frozen candidate on bars that arrived after its cutoff and shows verdicts and your forecast score; verdicts need
   time (new daily bars), so check them at the start of a cycle and write what you learn as lessons.
 - Never use a final test to choose between parameters; studies and frozen candidates exist so that the final-test windows can stay scarce.
 
@@ -61,6 +69,9 @@ Your own Python strategies
   and raises the luck benchmark, so tune on train and register deliberately. Then register a hypothesis with `{"label": "...", "code_file": "<name>.py", "params": {...}}`.
 - Improve a strategy by editing the file (git keeps the versions) and registering the change as a new hypothesis; the code hash is part of
   every experiment, so results are always traceable to the exact code.
+
+Audit: every bridge call (your request, the answer, success or error, duration) is appended automatically to a tamper-evident audit log on the data volume; nothing for you to do. Your
+reasoning in the final report is kept by Trinity and archived by the operator.
 
 Rules: results are simulations, not realized revenue. If something looks wrong (shortfall above zero, drawdown halts, data gaps),
 `halt` with a reason; only the operator resumes. Never put credentials, account details or secrets into strategies or lessons.
