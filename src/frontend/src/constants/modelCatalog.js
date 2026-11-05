@@ -9,6 +9,36 @@
 
 export const MODEL_CATALOG = [
   {
+    "id": "xai/grok-4.7",
+    "label": "Grok 4.7",
+    "note": "Tasks only — xAI credentials",
+    "publicChannel": false,
+    "adminDefaultSelectable": false,
+    "recommended": false,
+    "workspace": false,
+    "workspaceTier": ""
+  },
+  {
+    "id": "deepseek/deepseek-flash",
+    "label": "DeepSeek Flash",
+    "note": "Tasks only — DeepSeek credentials",
+    "publicChannel": false,
+    "adminDefaultSelectable": false,
+    "recommended": false,
+    "workspace": false,
+    "workspaceTier": ""
+  },
+  {
+    "id": "google/gemini-3.8-flash",
+    "label": "Gemini 3.8 Flash",
+    "note": "Tasks only — Google credentials",
+    "publicChannel": false,
+    "adminDefaultSelectable": false,
+    "recommended": false,
+    "workspace": false,
+    "workspaceTier": ""
+  },
+  {
     "id": "claude-opus-5",
     "label": "Claude Opus 5",
     "note": "Most capable Opus (latest)",

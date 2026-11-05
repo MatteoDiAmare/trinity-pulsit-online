@@ -6,6 +6,29 @@
 
 ## 14. Multi-Runtime Support
 
+### Per-task model providers (PULSIT-MODELS-001)
+
+- A stateless task may select an explicit `provider/model` (for example
+  `xai/grok-4.7` or `deepseek/deepseek-flash`) without changing the agent's
+  native chat runtime, identity, workspace, or existing MCP configuration.
+- Use a pinned OpenCode CLI for these tasks. It must execute tools, rather
+  than return a text-only consultation. Carry the agent identity and platform
+  prompt into that run; adapt MCP names to the executing harness.
+- The same routing applies to synchronous tasks, asynchronous callbacks and
+  claimed pull tasks. Existing unqualified models retain their native path.
+- Task/schedule free-text model fields and MCP task calls accept the qualified
+  model shape. Interactive native chat and cached native sessions are separate
+  surfaces: reject incompatible resume ids instead of silently losing context.
+- Preserve MCP server definitions, per-spawn credential loading, read-only mode,
+  tool restrictions, existing command/file hooks, cancellation, timeouts and
+  credential sanitization. Missing CLI/config/credentials must produce an
+  explicit error; never silently run the requested task on another provider.
+- Record the selected model, actual usage and execution transcript. Do not
+  retry a failed run automatically: a tool may already have had an effect.
+- Source and local protocol tests do not establish live-provider or production
+  readiness. Deployment needs the rebuilt agent image and assigned provider
+  credentials; existing native chat defaults are unchanged.
+
 ### 14.1 Runtime Adapter Architecture
 - **Status**: ✅ Implemented (2025-12-28)
 - **Description**: Abstract interface for agent execution engines

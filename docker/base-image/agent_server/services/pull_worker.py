@@ -49,6 +49,7 @@ from typing import Any, Dict, Optional
 
 import httpx
 from fastapi import HTTPException
+from ..provider_models import is_provider_task_model
 
 from ..state import agent_state
 
@@ -263,11 +264,12 @@ def _failed_result_body_from_http(claim_token: Optional[str], exc: HTTPException
         "claim_token": claim_token,
         "status": "failed",
         "content": error_msg,
-        "error_code": _PULL_STATUS_MAP.get(exc.status_code, "agent_error"),
+        "error_code": ("agent_error" if is_provider_task_model(metadata.get("model_name")) and exc.status_code != 504
+                       else _PULL_STATUS_MAP.get(exc.status_code, "agent_error")),
         "cost": None,
         "tokens": None,
         "session_id": None,
-        "execution_log": None,
+        "execution_log": detail.get("execution_log") if isinstance(detail, dict) else None,
         "metadata": metadata,
     }
 
@@ -383,8 +385,6 @@ async def _run_and_report(
     ``session_id`` IS present the worker resumes it (``resume_session_id`` +
     ``persist_session``), matching the SESSION_TAB ``--resume`` convention — the
     minimal reversible reading of the schema's "presence ⇒ persist/resume"."""
-    from ..services.runtime_adapter import get_runtime
-
     execution_id = claim.get("execution_id")
     claim_token = claim.get("claim_token")
     envelope = claim.get("envelope") or {}
@@ -393,10 +393,16 @@ async def _run_and_report(
     session_id = payload.get("session_id")
     overrides = payload.get("task_overrides") or {}
     turn_timeout = _resolve_turn_timeout(overrides)
+    if is_provider_task_model(overrides.get("model")):
+        from ..services.runtime_adapter import get_task_runtime
+        runtime = get_task_runtime(overrides["model"])
+    else:
+        from ..services.runtime_adapter import get_runtime
+        runtime = get_runtime()
 
     agent_state.record_task_start()
     try:
-        response_text, raw_messages, metadata, ran_session_id = await get_runtime().execute_headless(
+        response_text, raw_messages, metadata, ran_session_id = await runtime.execute_headless(
             prompt=message,
             model=overrides.get("model"),
             allowed_tools=overrides.get("allowed_tools"),

@@ -398,7 +398,10 @@ export function createChatTools(
           .string()
           .optional()
           .describe(
-            "Model override for this request — short alias (sonnet, opus, haiku) or a full ID (e.g., 'claude-opus-4-8', 'claude-sonnet-4-6'). Only applies when parallel=true."
+            "Model override for this task: a native model ID/alias, or provider/model " +
+            "(e.g. 'xai/grok-4.7', 'deepseek/deepseek-flash', 'google/gemini-3.8-flash') " +
+            "for multi-provider tool execution in the same agent workspace. Requires the " +
+            "updated agent image and that provider's credentials. Only applies when parallel=true."
           ),
         allowed_tools: z
           .array(z.string())

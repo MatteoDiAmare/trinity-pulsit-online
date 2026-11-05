@@ -29,6 +29,7 @@ from typing import Any, Dict, Optional
 
 from config import MAX_REDELIVERY
 from database import db
+from provider_models import is_provider_task_model
 from models import TaskExecutionStatus
 from services import event_dispatch_service
 from services import subscription_auto_switch
@@ -86,7 +87,7 @@ def _compose_pull_system_prompt(
     than left to default because this context previously omitted the field
     entirely — not ``None``-valued, absent — so every pull-claimed turn would
     have resolved VERBOSE forever with nothing to indicate why."""
-    runtime = _resolve_agent_runtime(agent_name)
+    runtime = "claude-code" if is_provider_task_model(model) else _resolve_agent_runtime(agent_name)
     try:
         exec_ctx = ExecutionContext(
             agent_name=agent_name,

@@ -58,6 +58,25 @@ The agent server also runs two loops: the 15-min git `auto_sync` heartbeat (see 
 
 A Trinity **harness IS an `AgentRuntime`** — the pluggable execution engine inside the agent container. Three ship today: **Claude Code** (default), **Gemini CLI**, and **OpenAI Codex** (#1187). `AGENT_RUNTIME` (container env, set from `template.yaml runtime:` via `crud.py`; also a `trinity.agent-runtime` label) selects one; `runtime_adapter.get_runtime()` is the factory — it **validates** the value against `KNOWN_RUNTIMES` and raises on an unknown one rather than silently defaulting to Claude.
 
+**Per-task providers (PULSIT-MODELS-001).** A qualified `provider/model` selects
+`get_task_runtime(model)` → `OpenCodeTaskRuntime`; unqualified ids keep the native
+factory. OpenCode **1.19.5** runs the actual tool loop in the same workspace, with
+the existing identity, translated local/remote `.mcp.json` servers and the platform
+prompt. Push, async callback and pull-worker task paths all use this selection.
+The pure-stdlib `provider_models.py` shape check is mirrored in the backend and
+agent image, with a byte-parity test. Native chat is separate and rejects this
+task-only override before changing conversation history.
+
+Configuration is passed in the child's environment, and the task through stdin;
+credentials use the existing per-spawn loader. The root-owned OpenCode plugin
+bridges to the existing bash/file/output hooks, while tool scopes, read-only mode,
+turn caps, timeout and process-group termination remain enforced. Failed runs
+retain sanitized tool events. External-provider auth/quota errors do not rotate
+Claude subscriptions or trigger an automatic second tool execution. The local
+fixture probe in `scripts/dev/probe_provider_task.py` exercises the real pinned
+CLI against loopback SSE, including a Bash write and a translated HTTP MCP call. It is not a live-provider or
+deployment test. Native resume ids and task image attachments are unsupported.
+
 **ABC** (`agent_server/services/runtime_adapter.py`): `execute` (chat), `execute_headless` (stateless task), `configure_mcp`, `is_available`, `get_default_model`, `get_context_window`, plus a non-abstract `capabilities()` returning a `RuntimeCapabilities` dataclass (`chat_continuity`, `session_tab_resume`, `mcp_support`, `cost_reporting: "native"|"estimated"`) — conservative by default (an un-overridden runtime is least-capable). Each runtime is a singleton (`get_<name>_runtime()`).
 
 **Context-window catalog (#1521):** the `% context used` denominator is model-specific, not a flat 200K. The runtime-reported `modelUsage.contextWindow` is the **primary** value (the only source that knows the effective plan/auth/beta window) — but `modelUsage` carries **one entry per model the turn touched** (Claude Code bills side work like tool-permission checks to a cheap Haiku), so `model_context.py::pick_context_window` matches the entry to the model that *answered* (`metadata.model_name`, from the latest assistant message) instead of taking an arbitrary one; an unidentifiable model keeps the seeded fallback rather than guessing, since picking the largest window is the direction that hides a compaction wall (#1840 — taking the first entry made the same agent report 1M and 200K on alternating runs). When the runtime value is absent, `services/model_context.py::resolve_context_window` is the **fallback** — `[1m]`→1M, Gemini→1M, Codex `gpt-5.6`→1.05M (a verified window, not a guess) / older Codex families→272K, bare Claude→200K *safe floor* (a 1M-capable model shows real 1M via the primary value; the floor is deliberate so an unknown tier never hides an imminent compaction wall), unknown id→200K + logged warning. It seeds `metadata.context_window` at construction in the Claude/headless paths (`get_context_window` is dead-code for Claude — the stream value overrides the seed) and backs `get_context_window` for the other runtimes + the non-abstract ABC default. Pure-stdlib, **vendored byte-identically** into `docker/base-image/agent_server/model_context.py` (Invariant #5, parity-tested); backend downstream fallbacks use the shared `DEFAULT_CONTEXT_WINDOW` constant. **The available-model picker is NOT this map** — the *selectable* catalog (id, label, note, and the `public_channel`/`admin_default_selectable`/`recommended` policy flags) is centralized in `services/model_catalog.py` (#2086, a stdlib-only leaf), which emits the checked-in `src/frontend/src/constants/modelCatalog.js` via `scripts/gen_model_catalog.py`; `ModelSelector.vue`, the `Settings.vue` admin dropdown, and `settings_service.PUBLIC_CHANNEL_MODELS` all derive from it, and `tests/unit/test_2086_model_catalog_parity.py` byte-matches + structurally validates the mirror on every PR. `model_catalog.py` is deliberately separate from this context-window map: it is not vendored (not consumed by the agent runtime), so folding the two together would break the Invariant #5 vendoring contract.

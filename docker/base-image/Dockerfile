@@ -184,6 +184,10 @@ RUN npm install -g @google/gemini-cli
 # the linux-x64 build lands here. Bump deliberately after testing.
 RUN npm install -g @openai/codex@0.147.0
 
+# PULSIT-MODELS-001: multi-provider tool execution for explicit provider/model tasks.
+# Keep native chat runtimes and their defaults unchanged.
+RUN npm install -g opencode-ai@1.19.5 && opencode --version
+
 RUN useradd -m -s /bin/bash -u 1000 developer && \
     echo "developer:developer" | chpasswd && \
     usermod -aG sudo developer && \
@@ -227,6 +231,7 @@ COPY ./hooks/bash-guardrail.py /opt/trinity/hooks/bash-guardrail.py
 COPY ./hooks/file-guardrail.py /opt/trinity/hooks/file-guardrail.py
 COPY ./hooks/output-scanner.py /opt/trinity/hooks/output-scanner.py
 COPY ./hooks/read-only-guard.py /opt/trinity/hooks/read-only-guard.py
+COPY ./hooks/opencode-guardrails.mjs /opt/trinity/hooks/opencode-guardrails.mjs
 COPY ./hooks/write-runtime-config.py /opt/trinity/hooks/write-runtime-config.py
 COPY ./hooks/guardrails-baseline.json /opt/trinity/guardrails-baseline.json
 RUN chmod 0555 /opt/trinity/hooks/*.py && \

@@ -78,6 +78,10 @@ const props = defineProps({
     type: Boolean,
     default: false
   },
+  providerTasks: {
+    type: Boolean,
+    default: false
+  },
   platformDefault: {
     type: String,
     default: null
@@ -93,6 +97,7 @@ const emit = defineEmits(['update:modelValue'])
 // passthrough (onInput below) still accepts any string, including the `[1m]`
 // extended-context suffix (e.g. 'claude-sonnet-4-6[1m]').
 const PRESET_MODELS = MODEL_CATALOG.map((m) => ({ value: m.id, label: m.label, note: m.note }))
+const supportedPresets = computed(() => PRESET_MODELS.filter(m => props.providerTasks || !m.value.includes('/')))
 
 const showDropdown = ref(false)
 const highlightedIndex = ref(-1)
@@ -114,12 +119,12 @@ const inputClass = computed(() => {
 })
 
 const filteredModels = computed(() => {
-  if (!isTyping.value || !props.modelValue) return PRESET_MODELS
+  if (!isTyping.value || !props.modelValue) return supportedPresets.value
   const query = props.modelValue.toLowerCase()
-  const filtered = PRESET_MODELS.filter(m =>
+  const filtered = supportedPresets.value.filter(m =>
     m.value.toLowerCase().includes(query) || m.label.toLowerCase().includes(query)
   )
-  return filtered.length > 0 ? filtered : PRESET_MODELS
+  return filtered.length > 0 ? filtered : supportedPresets.value
 })
 
 function onInput(event) {

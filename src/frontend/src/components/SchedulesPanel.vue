@@ -126,6 +126,7 @@
             <div>
               <ModelSelector
                 v-model="formData.model"
+                provider-tasks
                 label="Model"
                 :platformDefault="platformDefaultModel"
               />

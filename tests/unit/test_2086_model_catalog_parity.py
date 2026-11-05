@@ -264,7 +264,12 @@ def test_per_model_flags():
     # group — so an 11th could be added and go entirely unasserted while green.
     from services.settings_service import PLATFORM_DEFAULT_MODEL_VALUE
 
-    checked = {haiku.id, *legacy_ids, *current} | {PLATFORM_DEFAULT_MODEL_VALUE}
+    provider_tasks = {m.id for m in by_id.values() if "/" in m.id}
+    for model_id in provider_tasks:
+        assert not by_id[model_id].public_channel
+        assert not by_id[model_id].admin_default_selectable
+        assert not by_id[model_id].workspace
+    checked = {haiku.id, *legacy_ids, *current} | {PLATFORM_DEFAULT_MODEL_VALUE} | provider_tasks
     assert checked == set(by_id), (
         f"models not covered by any flag group: {sorted(set(by_id) - checked)} — "
         "add each to the group that states its intended policy"

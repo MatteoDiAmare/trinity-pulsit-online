@@ -187,6 +187,15 @@ _CODEX_RUNTIMES = frozenset({"codex"})
 KNOWN_RUNTIMES = _CLAUDE_RUNTIMES | _GEMINI_RUNTIMES | _CODEX_RUNTIMES
 
 
+def get_task_runtime(model: Optional[str] = None):
+    """Qualified provider/model tasks use OpenCode; native chat is unchanged."""
+    from ..provider_models import is_provider_task_model
+    if is_provider_task_model(model):
+        from .provider_task_runtime import OpenCodeTaskRuntime
+        return OpenCodeTaskRuntime()
+    return get_runtime()
+
+
 def get_runtime() -> AgentRuntime:
     """
     Factory function to get the appropriate runtime based on configuration.

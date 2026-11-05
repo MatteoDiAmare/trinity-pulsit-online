@@ -56,6 +56,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from provider_models import is_provider_task_model
 
 
 @dataclass(frozen=True)
@@ -105,6 +106,11 @@ class ModelEntry:
 #     https://platform.claude.com/docs/en/about-claude/models/overview
 # Last synced: 2026-09-12 (#2726 — Claude Fable 5.1)
 MODEL_CATALOG: tuple[ModelEntry, ...] = (
+    # Explicit provider/model ids route stateless tasks through OpenCode.
+    # Not offered as native-chat, public-channel or fleet-default overrides.
+    ModelEntry("xai/grok-4.7", "Grok 4.7", "Tasks only — xAI credentials", False, False, False),
+    ModelEntry("deepseek/deepseek-flash", "DeepSeek Flash", "Tasks only — DeepSeek credentials", False, False, False),
+    ModelEntry("google/gemini-3.8-flash", "Gemini 3.8 Flash", "Tasks only — Google credentials", False, False, False),
     # Current generation.
     ModelEntry(
         "claude-opus-5",
@@ -284,7 +290,7 @@ def validate_dispatch_model(raw: str | None) -> str | None:
     model = (raw or "").strip() or None
     if model is None:
         return None
-    if model.lower().startswith(_MODEL_FAMILY_PREFIXES):
+    if is_provider_task_model(model) or model.lower().startswith(_MODEL_FAMILY_PREFIXES):
         return model
     # Bounded before it is echoed. The field is deliberately unbounded at the
     # payload layer, so without this an authenticated caller could have a
@@ -293,7 +299,7 @@ def validate_dispatch_model(raw: str | None) -> str | None:
     shown = model if len(model) <= 64 else model[:64] + "…"
     raise InvalidModelError(
         f"'{shown}' is not a model id. Use a short alias (sonnet, opus, haiku, "
-        f"fable) or a full id such as '{_recommended[0].id}'."
+        f"fable), a full id such as '{_recommended[0].id}', or provider/model for a task."
     )
 
 

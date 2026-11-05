@@ -93,7 +93,7 @@
       <!-- Model & Timeout Selectors -->
       <div class="flex items-center space-x-3 mb-3">
         <div class="flex-1">
-          <ModelSelector v-model="selectedModel" label="Model" compact />
+          <ModelSelector v-model="selectedModel" label="Model" compact provider-tasks />
         </div>
         <div>
           <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Timeout</label>

@@ -35,6 +35,7 @@ from typing import Any, Dict, Optional, Set
 
 import httpx
 from fastapi import HTTPException
+from ..provider_models import is_provider_task_model
 
 from ..state import agent_state
 from .process_registry import get_process_registry
@@ -204,12 +205,16 @@ def _envelope_from_http_exception(exc: HTTPException) -> Dict:
         error_msg = str(detail)[:500]
 
     error_code, terminal_reason = _STATUS_MAP.get(exc.status_code, (None, "error"))
+    if is_provider_task_model(metadata.get("model_name")) and exc.status_code != 504:
+        # An external provider's key/quota cannot be fixed by rotating Claude.
+        error_code, terminal_reason = "agent_error", "provider_error"
     return {
         "status": "failed",
         "error": error_msg,
         "error_code": error_code,
         "terminal_reason": terminal_reason,
         "metadata": metadata,
+        "execution_log": detail.get("execution_log") if isinstance(detail, dict) else None,
     }
 
 
@@ -306,11 +311,14 @@ async def _deliver(
 
 async def _run_and_report(request, backend_url: str, mcp_key: str, dispatch_monotonic: float) -> None:
     """Run the headless turn, build + persist the typed terminal, deliver it."""
-    from ..services.runtime_adapter import get_runtime
-
     execution_id = request.execution_id
     agent_name = agent_state.agent_name
-    runtime = get_runtime()
+    if is_provider_task_model(request.model):
+        from ..services.runtime_adapter import get_task_runtime
+        runtime = get_task_runtime(request.model)
+    else:
+        from ..services.runtime_adapter import get_runtime
+        runtime = get_runtime()
 
     agent_state.record_task_start()
     try:

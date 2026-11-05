@@ -42,6 +42,56 @@ A Codex agent authenticates in one of two ways, and Trinity handles the file the
 - **API key** — inject `OPENAI_API_KEY` (or `CODEX_API_KEY`) as a credential. Trinity logs the CLI in with that key before the agent's first turn, so an API-key Codex agent works out of the box. If you rotate the key in `.env`, the next turn re-logs in with the new one.
 - **ChatGPT plan** — run `codex login` yourself from the agent's terminal. Trinity never overwrites a plan login with an API key.
 
+### Per-task model providers (Pulsit fork)
+
+An existing agent can run a task with another provider without changing its
+native chat runtime. Select a qualified model in Tasks, Schedules or Loops:
+
+| Model | Credential injected into that agent |
+|---|---|
+| `xai/grok-4.7` | `XAI_API_KEY` |
+| `deepseek/deepseek-flash` | `DEEPSEEK_API_KEY` |
+| `google/gemini-3.8-flash` | `GOOGLE_GENERATIVE_AI_API_KEY` (or existing `GOOGLE_API_KEY`) |
+
+Provider access and billing belong to the configured provider account. Credentials
+go through the agent's existing Credentials / Quick Injection mechanism; keep
+them out of task text and source control. Other OpenCode provider/model ids work
+through the model field when their corresponding credentials are available.
+Custom provider definitions may be injected as `OPENCODE_CONFIG_CONTENT`.
+
+An agent can also select a model using its existing Trinity MCP tool, including
+for a self-task:
+
+```json
+{
+  "agent_name": "your-agent-name",
+  "message": "Complete the assigned task and report the actual result.",
+  "parallel": true,
+  "model": "xai/grok-4.7"
+}
+```
+
+The selected model gets the agent's identity, workspace and configured MCP
+servers, including any connected browser or mail tools. The model connection
+does not itself create a Gmail or other service integration. Tasks start fresh;
+include the task context they need. Native chat histories and resumable native
+sessions stay on their existing runtime. Image attachments are not yet supported
+on this task path. A failed task is not silently moved to another provider or
+rerun after it may have taken an external action.
+
+**Rollout:** update the platform services from this source, run
+`./scripts/deploy/build-base-image.sh`, then stop/start or use Trinity's Restart
+action for each affected agent so the image-drift check adopts the new image.
+A plain Docker container restart keeps its old image. Existing agent workspace
+volumes are retained by Trinity's restart path. Validate one task before widening
+the rollout; confirm its recorded model and tool result. There is no live-provider
+or production-deployment claim from local source tests.
+
+For a credential-free protocol check with the pinned OpenCode CLI on PATH, run
+`python scripts/dev/probe_provider_task.py`. It uses a temporary synthetic agent
+and a loopback fixture provider, and verifies an actual tool-created file and
+an HTTP MCP tool result.
+
 ### Headless runs on Claude Code
 
 A task, schedule, loop, or MCP call runs the agent as a one-shot turn: nothing the agent starts survives the end of that turn. Claude Code's built-in tools that promise a *later* event — a scheduled wake-up, a cron entry, a workflow or task-output notification, a message to another local session, a push notification, a remote trigger — would let the agent plan around an event that will never arrive, so Trinity withholds that tool family from headless runs (`ScheduleWakeup`, `Workflow`, `Monitor`, `TaskOutput`, `CronCreate`/`CronList`/`CronDelete`, `SendMessage`, `ListAgents`, `PushNotification`, `RemoteTrigger`). The agent is told the same thing in its platform prompt and pointed at the platform's own mechanisms instead: `run_agent_loop` for repetition, `set_reminder` for a deferred self-trigger, and `chat_with_agent` for talking to another agent — see [Agent Loops](../automation/agent-loops.md) and [Agent Reminders](../automation/agent-reminders.md). Subagents are unaffected: the turn waits for them. A background shell command that is still running when the turn ends is killed, and the execution records that it was, instead of reporting a clean success.

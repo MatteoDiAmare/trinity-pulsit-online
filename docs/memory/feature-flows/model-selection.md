@@ -2,12 +2,23 @@
 
 ## Overview
 
-Model selection allows users to choose which Claude model to use across three contexts:
+Model selection allows users to choose the native model across three contexts:
 1. **Terminal**: Select model for interactive terminal sessions (CFG-005/CFG-006, original)
 2. **Tasks**: Select model for manual task execution via the Tasks tab (MODEL-001)
 3. **Schedules**: Configure a per-schedule model for automated cron executions (MODEL-001)
 
 The `model_used` field is recorded on every execution for audit and cost tracking.
+
+**Per-task providers (PULSIT-MODELS-001):** Tasks, schedules and loops also accept
+qualified ids such as `xai/grok-4.7`, `deepseek/deepseek-flash` and
+`google/gemini-3.8-flash`. Their picker enables `providerTasks`; native chat hides
+these presets. Other provider/model ids remain available through free text.
+Qualified tasks run through the pinned OpenCode CLI in the existing agent's
+workspace, with its identity and MCP tools. The MCP `chat_with_agent` tool uses
+this path with `parallel=true` and may target the calling agent itself. Native
+conversation sessions are not transferred between models. See
+[Agent Runtimes](../../user-docs/agents/agent-runtimes.md#per-task-model-providers-pulsit-fork)
+for credentials, rollout and a concrete call.
 
 ## User Stories
 

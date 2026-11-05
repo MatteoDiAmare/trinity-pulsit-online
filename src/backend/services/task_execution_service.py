@@ -27,6 +27,7 @@ from enum import Enum
 from typing import Any, Optional
 
 import httpx
+from provider_models import is_provider_task_model
 
 from database import db
 from services.agent_auth import agent_httpx_client
@@ -1079,6 +1080,7 @@ class _AttemptState:
     retry_count: int = 0
     previous_attempt_cost: float = 0.0
     subscription_switch_attempted: bool = False
+    provider_task: bool = False
     execution_time_ms: int = 0
     # #2638: the switch that actually happened during this turn — pre-dispatch
     # or post-failure — carried onto `TaskExecutionResult` so a caller can say
@@ -1321,8 +1323,8 @@ class TaskExecutionService:
         # ---- 1. Create execution record (if not provided) ----------------
         if not execution_id:
             # Snapshot subscription at record time (best-effort) for usage tracking (SUB-004)
-            _exec_sub_id = subscription_id
-            if _exec_sub_id is None:
+            _exec_sub_id = None if is_provider_task_model(model) else subscription_id
+            if _exec_sub_id is None and not is_provider_task_model(model):
                 try:
                     _exec_sub_id = db.get_agent_subscription_id(agent_name)
                 except Exception:
@@ -1355,7 +1357,8 @@ class TaskExecutionService:
         # handlers below (they read what the retries wrote). Created BEFORE the
         # try so no handler can NameError on a pre-dispatch exception.
         _now = datetime.utcnow()
-        state = _AttemptState(start_time=_now, turn_started_at=_now)
+        state = _AttemptState(start_time=_now, turn_started_at=_now,
+                              provider_task=is_provider_task_model(model))
 
         # ---- #2391: does this dispatch belong on the durable queue? --------
         # Evaluated here, where every field the queued row needs is in scope.
@@ -1901,7 +1904,8 @@ class TaskExecutionService:
         """
         # Resolve the agent runtime (best-effort, never raises) so the
         # MCP-tool naming matches the harness (#1187 F-MCP).
-        agent_runtime = _resolve_agent_runtime(agent_name)
+        agent_runtime = ("claude-code" if is_provider_task_model(model)
+                         else _resolve_agent_runtime(agent_name))
         try:
             exec_ctx = ExecutionContext(
                 agent_name=agent_name,
@@ -1959,6 +1963,7 @@ class TaskExecutionService:
         those handlers exactly as they did inline.
         """
         effective_timeout = float(timeout_seconds or 600) + _AGENT_HTTP_SLACK_S
+        state.provider_task = is_provider_task_model(payload.get("model"))
 
         # #2638 AC#3: SUB-003 has always been reactive — dispatch, get refused,
         # switch, re-issue once (#792). Everything needed to skip that first
@@ -1974,7 +1979,8 @@ class TaskExecutionService:
             from services.subscription_auto_switch import (
                 ensure_serviceable_subscription,
             )
-            pre_switch = await ensure_serviceable_subscription(agent_name)
+            pre_switch = (None if state.provider_task
+                          else await ensure_serviceable_subscription(agent_name))
             if pre_switch:
                 state.subscription_switch = pre_switch
                 # A turn gets at most ONE remediation, and this was it. Without
@@ -2026,7 +2032,7 @@ class TaskExecutionService:
         # re-issue the request once with the same execution_id. The
         # agent-server side reuses the row, so this is a true in-line
         # retry (not a new execution).
-        if response.status_code == 502:
+        if not state.provider_task and response.status_code == 502:
             try:
                 body = response.json()
             except Exception:
@@ -2133,7 +2139,7 @@ class TaskExecutionService:
         # Guarded by its own one-shot flag (NOT state.retry_count, which #678 owns) so
         # the two retry reasons never suppress each other; the except handler
         # reads the flag to skip a cascade double-switch.
-        if not state.subscription_switch_attempted:
+        if not state.provider_task and not state.subscription_switch_attempted:
             switch_failure_kind = classify_switch_failure(response)
             if switch_failure_kind is not None:
                 state.subscription_switch_attempted = True
@@ -2550,7 +2556,7 @@ class TaskExecutionService:
         # again — a second switch would burn another rate-limit event and churn
         # to a third never-used subscription.
         agent_status_code = getattr(getattr(e, "response", None), "status_code", None)
-        if not state.subscription_switch_attempted:
+        if not state.provider_task and not state.subscription_switch_attempted:
             try:
                 from services.subscription_auto_switch import (
                     handle_subscription_failure,
@@ -2574,10 +2580,10 @@ class TaskExecutionService:
         # Issue #285: Detect auth failures (HTTP 503 from agent server)
         # Return structured error code so callers can handle appropriately
         error_code = None
-        if agent_status_code == 503:
+        if not state.provider_task and agent_status_code == 503:
             logger.warning(f"[TaskExecService] Auth failure detected on {agent_name}: {error_msg[:200]}")
             error_code = TaskExecutionErrorCode.AUTH
-        elif agent_status_code == 429:
+        elif not state.provider_task and agent_status_code == 429:
             # #2638: a Claude subscription usage limit surfaces from the agent
             # as 429, not 503 — and this branch classified only 503, so the code
             # stayed None and every client-facing consumer fell through to the

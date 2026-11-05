@@ -46,6 +46,7 @@ from models import (
     activity_state_for_terminal,
 )
 from database import db
+from provider_models import is_provider_task_model
 from services.activity_service import activity_service
 from services.agent_auth import agent_httpx_client
 from services.docker_service import get_agent_container
@@ -1324,7 +1325,7 @@ async def create_task_execution_and_activities(
     self_task_activity_id)."""
     # SUB-004: subscription snapshot at creation time (best-effort).
     try:
-        subscription_id = db.get_agent_subscription_id(name)
+        subscription_id = None if is_provider_task_model(request.model) else db.get_agent_subscription_id(name)
     except Exception:
         subscription_id = None
 

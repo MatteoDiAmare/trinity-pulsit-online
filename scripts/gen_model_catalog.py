@@ -26,6 +26,8 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parents[1]
 _SOURCE = _ROOT / "src" / "backend" / "services" / "model_catalog.py"
 _OUTPUT = _ROOT / "src" / "frontend" / "src" / "constants" / "modelCatalog.js"
+# provider_models is a stdlib-only leaf; do not import the services package.
+sys.path.insert(0, str(_ROOT / "src" / "backend"))
 
 
 def _load_render_js():

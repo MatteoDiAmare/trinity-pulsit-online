@@ -14,7 +14,8 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from ..models import ChatRequest, ModelRequest, ParallelTaskRequest
 from ..state import agent_state
 from ..services.claude_code import get_execution_lock
-from ..services.runtime_adapter import get_runtime
+from ..services.runtime_adapter import get_runtime, get_task_runtime
+from ..provider_models import is_provider_task_model
 from ..services.process_registry import get_process_registry, PENDING_CHAT_TIMEOUT_SECONDS
 from ..services import result_callback
 
@@ -31,6 +32,8 @@ async def chat(request: ChatRequest):
     at a time. This is a safety net - the platform-level execution queue
     should prevent parallel requests, but this provides defense-in-depth.
     """
+    if is_provider_task_model(request.model or agent_state.current_model):
+        raise HTTPException(400, "provider/model overrides run through /api/task; native chat sessions are unchanged")
     # #2433: the backend's row is already `running` and its slot is held while
     # this request waits on the execution lock below — and nothing registered
     # it, so the watchdog's proof-of-life (running ∪ recently-completed) missed
@@ -159,7 +162,7 @@ async def execute_task(request: ParallelTaskRequest):
         )
 
     # Execute via runtime adapter in headless mode (no lock, no --continue)
-    runtime = get_runtime()
+    runtime = get_task_runtime(request.model) if is_provider_task_model(request.model) else get_runtime()
     # #2433: register as ACCEPTED before anything can queue. The headless
     # executor's `Popen` + `registry.register()` run inside a pool thread, so a
     # request beyond the pool size was counted in /health `active_tasks` but
