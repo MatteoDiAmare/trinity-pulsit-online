@@ -3,7 +3,7 @@
 The MAX_REDELIVERY cap + poison-park *mechanism* shipped in Phase 3 (#1550,
 ``services/lease_reaper_service.py``); #1402's remaining deliverable is the
 *authored contract* agents receive: fire-and-park (never block a turn waiting
-on a human), ask-before-irreversible-actions, and collision-safe derived
+on a human), reuse of standing authorization, and collision-safe derived
 request ids. That contract lives in the platform system prompt
 (``platform_prompt_service.PLATFORM_INSTRUCTIONS`` → "Operator Communication"
 + the ``_mode_guidance`` task-mode carve-out) with a synced reference copy in
@@ -51,7 +51,7 @@ RUNTIMES = ("claude-code", "codex", "gemini-cli", "")
 SENTINELS = (
     "fire-and-park, never block-and-wait",
     "End your turn.",
-    "Ask before irreversible actions",
+    "Reuse existing authorization",
     "Request IDs must be globally unique",
     "approval-{execution_id}",
     "expires_at",
@@ -137,14 +137,22 @@ def test_operator_section_is_mcp_name_free():
     assert "mcp__trinity__" not in _operator_section(PLATFORM_INSTRUCTIONS)
 
 
+@pytest.mark.parametrize("runtime", RUNTIMES)
+def test_standing_authority_is_checked_before_requesting_another_approval(runtime):
+    section = _operator_section(get_platform_system_prompt(runtime))
+    assert "current task and standing mandate" in section
+    assert "not grounds to request the same approval again" in section
+    assert "genuinely missing authority or a material unresolved choice" in section
+    assert "check prior effects before retrying" in section
+
+
 # ---------------------------------------------------------------------------
 # Task-mode guidance carve-out (the contradiction fix)
 # ---------------------------------------------------------------------------
 
 def test_task_mode_guidance_carries_park_carveout():
-    """Task mode says "execute to completion — do not ask clarifying questions";
-    without the carve-out that directly contradicts parking an approval before
-    an irreversible action (#1402 review finding A3)."""
+    """Task mode completes authorized work, while genuinely missing authority
+    can still be parked asynchronously (#1402 review finding A3)."""
     guidance = _mode_guidance("task")
     assert "fire-and-park" in guidance
     assert "operator queue" in guidance

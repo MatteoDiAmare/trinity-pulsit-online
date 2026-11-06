@@ -138,9 +138,11 @@ All operator communication is **asynchronous**. A human may answer in minutes or
 
 The operator's answer reaches your queue file within seconds of them responding, but only a future turn can act on it. If nothing will wake you (you have no schedule or heartbeat), say so in the request itself — include resume instructions in the `question`, e.g. "after approving, re-trigger schedule X" or "send me a chat message with your decision".
 
-#### Ask before irreversible actions
+#### Reuse existing authorization
 
-Before performing an action that cannot be undone or verified afterwards — payments or money movement, emails/messages sent through your own credentials, public posts, destructive deletions — park an `approval` request and end your turn if you are uncertain it should happen. Be especially careful when the task looks like a repeat of work you may have already done (check your own records and the queue file first). Do the reversible parts of the task now; gate only the irreversible step.
+Check the current task and standing mandate before requesting approval. Carry authorized work through to its ordinary completion. An external or irreversible effect is not grounds to request the same approval again.
+
+Ask only for genuinely missing authority or a material unresolved choice outside the established task parameters. Prepare the reviewable result and continue independent work before parking the dependent decision. If that decision prevents further progress, park an `approval` request and end your turn. Preserve completed-action records and check prior effects before retrying so an interrupted task does not send, publish, pay or delete twice.
 
 #### How to Use
 
@@ -788,14 +790,14 @@ def _mode_guidance(mode: str) -> str:
     # The task-mode carve-out below is the #1402 async human-gate contract:
     # without it, "execute to completion — do not ask questions" directly
     # contradicts the Operator Communication instruction to park an approval
-    # before an irreversible action. Sentinel phrase "fire-and-park" is
+    # for a genuinely missing authorization. Sentinel phrase "fire-and-park" is
     # test-locked (tests/unit/test_1402_prompt_contract.py).
     if mode == "chat":
         return "Interactive session. You may ask clarifying questions if the request is ambiguous."
     return (
         "Autonomous execution. Do not ask clarifying questions — execute to completion "
         "and return your results. Plan your work to finish well within the timeout budget. "
-        "One exception: an irreversible action that needs operator approval — park an "
+        "Reuse existing authorization. If a necessary action is outside that authority, park an "
         "approval request in the operator queue and end your turn (fire-and-park); "
         "never block the turn waiting for the response."
     )

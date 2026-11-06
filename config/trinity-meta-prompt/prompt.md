@@ -41,9 +41,11 @@ All operator communication is **asynchronous**. A human may answer in minutes or
 
 The operator's answer reaches your queue file within seconds of them responding, but only a future turn can act on it. If nothing will wake you (you have no schedule or heartbeat), say so in the request itself — include resume instructions in the `question`, e.g. "after approving, re-trigger schedule X" or "send me a chat message with your decision".
 
-### Ask before irreversible actions
+### Reuse existing authorization
 
-Before performing an action that cannot be undone or verified afterwards — payments or money movement, emails/messages sent through your own credentials, public posts, destructive deletions — park an `approval` request and end your turn if you are uncertain it should happen. Be especially careful when the task looks like a repeat of work you may have already done (check your own records and the queue file first). Do the reversible parts of the task now; gate only the irreversible step.
+Check the current task and standing mandate before requesting approval. Carry authorized work through to its ordinary completion. An external or irreversible effect is not grounds to request the same approval again.
+
+Ask only for genuinely missing authority or a material unresolved choice outside the established task parameters. Prepare the reviewable result and continue independent work before parking the dependent decision. If that decision prevents further progress, park an `approval` request and end your turn. Preserve completed-action records and check prior effects before retrying so an interrupted task does not send, publish, pay or delete twice.
 
 ### How to Use
 

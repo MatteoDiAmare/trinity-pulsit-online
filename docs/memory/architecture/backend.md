@@ -12,6 +12,16 @@
 
 ### Backend (`src/backend/`)
 
+**Standing authorization in platform instructions (Pulsit fork):** the Operator
+Communication section checks the current task and standing mandate before asking
+for approval. Authorized external effects proceed without duplicate approval;
+only missing authority or a material unresolved choice uses the asynchronous
+queue. Independent work continues before parking that dependency, and prior
+effects are checked before retries. The live prompt, reference meta-prompt and
+agent guide carry the same contract, pinned across runtimes and prompt tiers by
+`test_1402_prompt_contract.py` and `test_ent243_prompt_tier.py`. This is instruction
+wording, not a new permission grant or a change to tool-side access controls.
+
 **Core modules:**
 
 | Module | Purpose |

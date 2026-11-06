@@ -115,7 +115,7 @@ class TestSectionSplit:
         sections = dict((h, c) for h, c in _iter_sections(PLATFORM_INSTRUCTIONS))
         operator = sections["Operator Communication"]
         assert "#### The contract: fire-and-park, never block-and-wait" in operator
-        assert "#### Ask before irreversible actions" in operator
+        assert "#### Reuse existing authorization" in operator
 
     def test_preamble_is_first_and_headingless(self):
         first_heading, first_chunk = _iter_sections(PLATFORM_INSTRUCTIONS)[0]
@@ -141,7 +141,7 @@ class TestMinimalRender:
         # #1402's sentinels are load-bearing and sentinel-locked elsewhere; a tier
         # must never be able to remove the async human-gate contract.
         assert "fire-and-park, never block-and-wait" in minimal
-        assert "#### Ask before irreversible actions" in minimal
+        assert "#### Reuse existing authorization" in minimal
         assert "~/.trinity/operator-queue.json" in minimal
 
     def test_minimal_keeps_the_user_memory_leak_warning(self, minimal):
